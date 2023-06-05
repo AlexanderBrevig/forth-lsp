@@ -1,0 +1,20 @@
+/Store
+!
+( x a-addr -- )
+Store x at a-addr. 
+
+/num
+#
+( ud1 -- ud2 )
+Divide ud1 by the number in BASE giving the quotient ud2 and the remainder n. (n is the least significant digit of ud1.) Convert n to external form and add the resulting character to the beginning of the pictured numeric output string. An ambiguous condition exists if # executes outside of a <# #> delimited number conversion. 
+
+/num-end
+#>
+( xd -- c-addr u )
+Drop xd. Make the pictured numeric output string available as a character string. c-addr and u specify the resulting character string. A program may replace characters within the string. 
+
+/numS
+#S
+( ud1 -- ud2 )
+Convert one digit of ud1 according to the rule for #. Continue conversion until the quotient is zero. ud2 is zero. An ambiguous condition exists if #S executes outside of a <# #> delimited number conversion. 
+
