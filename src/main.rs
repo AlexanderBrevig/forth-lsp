@@ -43,10 +43,11 @@
 //! ```
 use std::error::Error;
 
-use lsp_types::OneOf;
+use lsp_types::request::HoverRequest;
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
+use lsp_types::{Hover, OneOf};
 
 use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
 
@@ -87,6 +88,22 @@ fn main_loop(
                     return Ok(());
                 }
                 eprintln!("got request: {req:?}");
+                match cast::<HoverRequest>(req.clone()) {
+                    Ok((id, params)) => {
+                        eprintln!("#{id}: {params:?}");
+                        // let result = Some(Hover {});
+                        // let result = serde_json::to_value(&result).unwrap();
+                        let resp = Response {
+                            id,
+                            result: Some("hello".into()),
+                            error: None,
+                        };
+                        connection.sender.send(Message::Response(resp))?;
+                        continue;
+                    }
+                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    Err(ExtractError::MethodMismatch(req)) => req,
+                };
                 match cast::<GotoDefinition>(req) {
                     Ok((id, params)) => {
                         eprintln!("got gotoDefinition request #{id}: {params:?}");
