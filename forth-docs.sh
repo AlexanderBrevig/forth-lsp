@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-dir="forth-standard.org"
-base_site="https://$dir"
+dir="data/forth-standard.org"
+base_site="https://forth-standard.org"
 topics=$(curl --silent "$base_site/standard/words" | htmlq '.boxList' --attribute href a)
 for topic in $topics
 do

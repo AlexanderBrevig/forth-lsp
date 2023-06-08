@@ -1,55 +1,49 @@
-//! A minimal example LSP server that can only respond to the `gotoDefinition` request. To use
-//! this example, execute it and then send an `initialize` request.
-//!
-//! ```no_run
-//! Content-Length: 85
-//!
-//! {"jsonrpc": "2.0", "method": "initialize", "id": 1, "params": {"capabilities": {}}}
-//! ```
-//!
-//! This will respond with a server response. Then send it a `initialized` notification which will
-//! have no response.
-//!
-//! ```no_run
-//! Content-Length: 59
-//!
-//! {"jsonrpc": "2.0", "method": "initialized", "params": {}}
-//! ```
-//!
-//! Once these two are sent, then we enter the main loop of the server. The only request this
-//! example can handle is `gotoDefinition`:
-//!
-//! ```no_run
-//! Content-Length: 159
-//!
-//! {"jsonrpc": "2.0", "method": "textDocument/definition", "id": 2, "params": {"textDocument": {"uri": "file://temp"}, "position": {"line": 1, "character": 1}}}
-//! ```
-//!
-//! To finish up without errors, send a shutdown request:
-//!
-//! ```no_run
-//! Content-Length: 67
-//!
-//! {"jsonrpc": "2.0", "method": "shutdown", "id": 3, "params": null}
-//! ```
-//!
-//! The server will exit the main loop and finally we send a `shutdown` notification to stop
-//! the server.
-//!
-//! ```
-//! Content-Length: 54
-//!
-//! {"jsonrpc": "2.0", "method": "exit", "params": null}
-//! ```
+use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 
-use lsp_types::request::HoverRequest;
+use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
-use lsp_types::{Hover, OneOf};
+use lsp_types::{
+    CompletionItem, CompletionResponse, Hover, Location, OneOf, Position, Range,
+    TextDocumentSyncKind, Url,
+};
 
-use lsp_server::{Connection, ExtractError, Message, Request, RequestId, Response};
+use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
+use ropey::{Rope, RopeSlice};
+use serde::Deserialize;
+
+#[derive(Deserialize, Default)]
+struct Data {
+    words: Vec<Word>,
+}
+
+#[derive(Deserialize, Default, Debug)]
+struct Word {
+    doc: String,
+    token: String,
+    stack: String,
+    help: String,
+}
+
+trait WordAtChar {
+    fn word_at_char(&self, char: usize) -> RopeSlice;
+}
+impl WordAtChar for Rope {
+    fn word_at_char(&self, chix: usize) -> RopeSlice {
+        let mut min = chix;
+        while min < self.len_chars() && !self.char(min).is_whitespace() {
+            min -= 1;
+        }
+        let mut max = chix;
+        while max < self.len_chars() && !self.char(max).is_whitespace() {
+            max += 1;
+        }
+        self.slice(min..max)
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     // Note that  we must have our logging only write out to stderr.
@@ -61,10 +55,15 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
 
     // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
     let server_capabilities = serde_json::to_value(&ServerCapabilities {
+        text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Kind(
+            TextDocumentSyncKind::INCREMENTAL,
+        )),
+        hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        completion_provider: Some(lsp_types::CompletionOptions::default()),
         ..Default::default()
     })
-    .unwrap();
+    .expect("Must be able to serialize the ServerCapabilities");
     let initialization_params = connection.initialize(server_capabilities)?;
     main_loop(connection, initialization_params)?;
     io_threads.join()?;
@@ -78,24 +77,125 @@ fn main_loop(
     connection: Connection,
     params: serde_json::Value,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
-    let _params: InitializeParams = serde_json::from_value(params).unwrap();
-    eprintln!("starting example main loop");
+    eprintln!("Starting main loop");
+    let _params: InitializeParams =
+        serde_json::from_value(params).expect("Must be able to deserialize the InitializeParams");
+    let filename = "/home/alexander/github.com/forth-lsp/data/forth-standard.org/core.toml";
+    let contents = fs::read_to_string(filename)?;
+    let data: Data = toml::from_str(&contents)?;
+    let mut files = HashMap::<String, Rope>::new();
+    // find matching token, build from token stack & help (doc?)
     for msg in &connection.receiver {
-        eprintln!("got msg: {msg:?}");
         match msg {
             Message::Request(req) => {
                 if connection.handle_shutdown(&req)? {
                     return Ok(());
                 }
-                eprintln!("got request: {req:?}");
+                eprintln!("got request: {:?}", req.method);
+                match cast::<Completion>(req.clone()) {
+                    Ok((id, params)) => {
+                        eprintln!("#{id}: {params:?}");
+                        let rope = files
+                            .get_mut(&params.text_document_position.text_document.uri.to_string())
+                            .expect("Must be able to get rope for lang");
+                        let mut ix = rope
+                            .line_to_char(params.text_document_position.position.line as usize)
+                            + params.text_document_position.position.character as usize;
+                        if ix >= rope.len_chars() {
+                            // never go out of bounds
+                            ix = rope.len_chars() - 1;
+                        } else {
+                            // as we're now most likely on a space
+                            // trigger on the just-now typed char
+                            ix -= 1;
+                        }
+                        let word = rope.word_at_char(ix).to_string().trim().to_string();
+                        let result = if word.len() > 0 {
+                            let mut ret = vec![];
+                            let candidates = data.words.iter().filter(|x| {
+                                x.token
+                                    .to_lowercase()
+                                    .starts_with(word.to_string().to_lowercase().as_str())
+                            });
+                            for candidate in candidates {
+                                ret.push(CompletionItem {
+                                    label: candidate.token.to_owned(),
+                                    detail: Some(candidate.stack.to_owned()),
+                                    documentation: Some(lsp_types::Documentation::MarkupContent(
+                                        lsp_types::MarkupContent {
+                                            kind: lsp_types::MarkupKind::Markdown,
+                                            value: candidate.help.to_owned(),
+                                        },
+                                    )),
+                                    ..Default::default()
+                                });
+                            }
+                            Some(CompletionResponse::Array(ret))
+                        } else {
+                            None
+                        };
+                        let result = serde_json::to_value(&result)
+                            .expect("Must be able to serialize the CompletionResponse");
+                        let resp = Response {
+                            id,
+                            result: Some(result),
+                            error: None,
+                        };
+                        connection.sender.send(Message::Response(resp))?;
+                        continue;
+                    }
+                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    Err(ExtractError::MethodMismatch(req)) => req,
+                };
                 match cast::<HoverRequest>(req.clone()) {
                     Ok((id, params)) => {
                         eprintln!("#{id}: {params:?}");
-                        // let result = Some(Hover {});
-                        // let result = serde_json::to_value(&result).unwrap();
+                        let rope = files
+                            .get_mut(
+                                &params
+                                    .text_document_position_params
+                                    .text_document
+                                    .uri
+                                    .to_string(),
+                            )
+                            .expect("Must be able to get rope for lang");
+                        let ix = rope.line_to_char(
+                            params.text_document_position_params.position.line as usize,
+                        ) + params.text_document_position_params.position.character
+                            as usize;
+                        let word = word_on_and_before_cursor(rope, ix);
+                        let result = if word.len() > 0 {
+                            let default_info = Word::default();
+                            let info = data
+                                .words
+                                .iter()
+                                .filter(|x| {
+                                    x.token
+                                        .to_lowercase()
+                                        .starts_with(word.to_string().to_lowercase().as_str())
+                                })
+                                .nth(0)
+                                .unwrap_or(&default_info);
+                            Some(Hover {
+                                contents: lsp_types::HoverContents::Markup(
+                                    lsp_types::MarkupContent {
+                                        kind: lsp_types::MarkupKind::Markdown,
+                                        value: format!(
+                                            "# `{}`   `{}`\n\n{}",
+                                            info.token, info.stack, info.help
+                                        ),
+                                    },
+                                ),
+                                range: None,
+                            })
+                        } else {
+                            None
+                        };
+                        let result = serde_json::to_value(&result)
+                            .expect("Must be able to serialize the Hover");
                         let resp = Response {
                             id,
-                            result: Some("hello".into()),
+                            result: Some(result),
                             error: None,
                         };
                         connection.sender.send(Message::Response(resp))?;
@@ -106,9 +206,84 @@ fn main_loop(
                 };
                 match cast::<GotoDefinition>(req) {
                     Ok((id, params)) => {
-                        eprintln!("got gotoDefinition request #{id}: {params:?}");
-                        let result = Some(GotoDefinitionResponse::Array(Vec::new()));
-                        let result = serde_json::to_value(&result).unwrap();
+                        eprintln!("#{id}: {params:?}");
+                        //TODO: recurse parse follow includes /^[iI][nN][cC][lL][uU][dD][eE] +(.*\..*)/
+                        //TODO: find colon defines /: +(?:.|\n)*;/
+                        //TODO: generate Vec<Location> from line num and col from the matching <file(s)>
+                        let rope = files
+                            .get_mut(
+                                &params
+                                    .text_document_position_params
+                                    .text_document
+                                    .uri
+                                    .to_string(),
+                            )
+                            .expect("Must be able to get rope for lang");
+                        let ix = rope.line_to_char(
+                            params.text_document_position_params.position.line as usize,
+                        ) + params.text_document_position_params.position.character
+                            as usize;
+                        let word = word_on_and_before_cursor(rope, ix);
+
+                        let mut cur_index = 0;
+                        let mut defn_index: i64 = -1;
+                        let mut defn = String::new();
+                        let mut ret: Vec<Location> = vec![];
+                        let mut chars_iter = rope.chars();
+                        while let Some(next_char) = chars_iter.next() {
+                            cur_index += 1;
+                            if next_char.is_whitespace() {
+                                if defn.len() > 0 {
+                                    if defn.trim() == word {
+                                        //TODO: replace parse input with loop
+                                        if let Ok(uri) = Url::parse(
+                                            params
+                                                .text_document_position_params
+                                                .text_document
+                                                .uri
+                                                .as_str(),
+                                        ) {
+                                            let start_line_nr =
+                                                rope.char_to_line(defn_index as usize);
+                                            let start_line_index = defn_index as u32
+                                                - rope.line_to_char(start_line_nr) as u32;
+                                            let defn_len = rope
+                                                .chars()
+                                                .skip(defn_index as usize)
+                                                .take_while(|x| *x != ';')
+                                                .count()
+                                                + 1;
+                                            let end_defn_index = defn_index as usize + defn_len;
+                                            let end_line_nr = rope.char_to_line(end_defn_index - 1);
+                                            let end_line_index =
+                                                end_defn_index - rope.line_to_char(end_line_nr);
+                                            ret.push(Location {
+                                                uri,
+                                                range: Range {
+                                                    start: Position {
+                                                        line: start_line_nr as u32,
+                                                        character: start_line_index,
+                                                    },
+                                                    end: Position {
+                                                        line: end_line_nr as u32,
+                                                        character: end_line_index as u32,
+                                                    },
+                                                },
+                                            });
+                                        }
+                                    }
+                                    defn_index = -1;
+                                }
+                                defn.clear();
+                            } else if next_char == ':' {
+                                defn_index = (cur_index - 1) as i64;
+                            } else if defn_index != -1 && !next_char.is_whitespace() {
+                                defn.push(next_char);
+                            }
+                        }
+                        let result = Some(GotoDefinitionResponse::Array(ret));
+                        let result = serde_json::to_value(&result)
+                            .expect("Must be able to serialize the GotoDefinitionResponse");
                         let resp = Response {
                             id,
                             result: Some(result),
@@ -127,10 +302,53 @@ fn main_loop(
             }
             Message::Notification(not) => {
                 eprintln!("got notification: {not:?}");
+                match cast_notification::<lsp_types::notification::DidOpenTextDocument>(not.clone())
+                {
+                    Ok(params) => {
+                        let rope = Rope::from_str(params.text_document.text.as_str());
+                        files.insert(params.text_document.uri.to_string(), rope);
+                        continue;
+                    }
+                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    Err(ExtractError::MethodMismatch(not)) => not,
+                };
+                match cast_notification::<lsp_types::notification::DidChangeTextDocument>(
+                    not.clone(),
+                ) {
+                    Ok(params) => {
+                        let rope = files
+                            .get_mut(&params.text_document.uri.to_string())
+                            .expect("Must be able to get rope for lang");
+                        for change in params.content_changes {
+                            let range = change.range.unwrap_or_default();
+                            let start = rope.line_to_char(range.start.line as usize)
+                                + range.start.character as usize;
+                            let end = rope.line_to_char(range.end.line as usize)
+                                + range.end.character as usize;
+                            rope.remove(start..end);
+                            rope.insert(start, change.text.as_str());
+                        }
+                    }
+                    Err(_) => todo!(),
+                }
             }
         }
     }
     Ok(())
+}
+
+fn word_on_and_before_cursor(rope: &mut Rope, ix: usize) -> String {
+    let word_on_cursor = rope.word_at_char(ix).to_string().trim().to_string();
+    // with helix, you typically end up with having a selected word including the previous space
+    // this means we should also look for a word behind the cursor
+    //TODO: make look-behind cleaner
+    let word_behind_cursor = rope.word_at_char(ix - 1).to_string().trim().to_string();
+    let word = if word_on_cursor.len() >= word_behind_cursor.len() {
+        word_on_cursor
+    } else {
+        word_behind_cursor
+    };
+    word
 }
 
 fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
@@ -139,4 +357,12 @@ where
     R::Params: serde::de::DeserializeOwned,
 {
     req.extract(R::METHOD)
+}
+
+fn cast_notification<N>(req: Notification) -> Result<N::Params, ExtractError<Notification>>
+where
+    N: lsp_types::notification::Notification,
+    N::Params: serde::de::DeserializeOwned,
+{
+    req.extract(N::METHOD)
 }
