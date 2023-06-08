@@ -2,8 +2,15 @@
 name = "forth-lsp"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "LSP for the Forth programming language"
+repository = "https://github.com/alexanderbrevig/forth-lsp"
+keywords = ["forth", "lsp"]
+categories = ["development-tools"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "forth-lsp"
+path = "src/main.rs"
 
 [dependencies]
 lsp-server = "0.7.0"
