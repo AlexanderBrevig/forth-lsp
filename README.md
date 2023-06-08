@@ -1,6 +1,5 @@
 # forth-lsp
 
-- [ ] Hover
-- [ ] Autocomplete
-- [ ] Format?
-- [ ] Rename symbol
+Currently this simple LSP supports `Hover`, `Completion` and `GotoDefinition`.
+
+Issues and PRs welcome :)
