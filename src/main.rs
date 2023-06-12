@@ -21,6 +21,9 @@ trait WordAtChar {
 }
 impl WordAtChar for Rope {
     fn word_at_char(&self, chix: usize) -> RopeSlice {
+        if self.char(chix).is_whitespace() {
+            return self.slice(chix..chix);
+        }
         let mut min = chix;
         while min > 0 && min < self.len_chars() && !self.char(min - 1).is_whitespace() {
             min -= 1;
@@ -29,8 +32,44 @@ impl WordAtChar for Rope {
         while max < self.len_chars() && !self.char(max + 1).is_whitespace() {
             max += 1;
         }
-        max += 1;
-        self.slice(min..max)
+        self.slice(min..(max + 1))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use ropey::Rope;
+
+    use crate::WordAtChar;
+
+    #[test]
+    fn word_at_center() {
+        let rope = Rope::from_str("Should find this");
+        let word = rope.word_at_char(8);
+        assert_eq!("find", word);
+    }
+    #[test]
+    fn word_at_begin() {
+        let rope = Rope::from_str("Should find this");
+        let word = rope.word_at_char(7);
+        assert_eq!("find", word);
+    }
+    #[test]
+    fn word_at_end() {
+        let rope = Rope::from_str("Should find this");
+        let word = rope.word_at_char(10);
+        assert_eq!("find", word);
+    }
+    #[test]
+    fn word_at_after() {
+        let rope = Rope::from_str("Should find this");
+        let word = rope.word_at_char(11);
+        assert_eq!("", word);
+    }
+    #[test]
+    fn word_at_single() {
+        let rope = Rope::from_str("Should + find this");
+        let word = rope.word_at_char(7);
+        assert_eq!("+", word);
     }
 }
 
@@ -101,7 +140,7 @@ fn main_loop(
                         }
                         let word = rope.word_at_char(ix);
                         eprintln!("Found word {}", word);
-                        let use_lower = if let Some(chr) = word.get_char(0) {
+                        let use_lower = if let Some(chr) = word.get_char(word.len_chars() - 1) {
                             chr.is_lowercase()
                         } else {
                             false
@@ -165,6 +204,9 @@ fn main_loop(
                             params.text_document_position_params.position.line as usize,
                         ) + params.text_document_position_params.position.character
                             as usize;
+                        if ix >= rope.len_chars() {
+                            return Err(format!("OUT OF BOUNDS! ix {}", ix).into());
+                        }
                         let word = word_on_and_before_cursor(rope, ix);
                         let result = if word.len() > 0 {
                             let default_info = &Word::default();
@@ -172,9 +214,8 @@ fn main_loop(
                                 .words
                                 .iter()
                                 .filter(|x| {
-                                    x.token
-                                        .to_lowercase()
-                                        .starts_with(word.to_string().to_lowercase().as_str())
+                                    x.token.to_lowercase()
+                                        == (word.to_string().to_lowercase().as_str())
                                 })
                                 .nth(0)
                                 .unwrap_or(&default_info);
@@ -340,17 +381,21 @@ fn main_loop(
 }
 
 fn word_on_and_before_cursor(rope: &mut Rope, ix: usize) -> String {
-    let word_on_cursor = rope.word_at_char(ix).to_string().trim().to_string();
+    let word_on_cursor = rope.word_at_char(ix);
     // with helix, you typically end up with having a selected word including the previous space
     // this means we should also look for a word behind the cursor
     //TODO: make look-behind cleaner
-    let word_behind_cursor = rope.word_at_char(ix - 1).to_string().trim().to_string();
-    let word = if word_on_cursor.len() >= word_behind_cursor.len() {
+    let word_behind_cursor = rope.word_at_char(ix - 1);
+    eprintln!(
+        "Word on `{}` before `{}`",
+        word_on_cursor, word_behind_cursor
+    );
+    let word = if word_on_cursor.len_chars() >= word_behind_cursor.len_chars() {
         word_on_cursor
     } else {
         word_behind_cursor
     };
-    word
+    word.to_string()
 }
 
 fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
