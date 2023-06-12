@@ -29,6 +29,7 @@ impl WordAtChar for Rope {
         while max < self.len_chars() && !self.char(max + 1).is_whitespace() {
             max += 1;
         }
+        max += 1;
         self.slice(min..max)
     }
 }
