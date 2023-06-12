@@ -1,6 +1,6 @@
+mod words;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs;
 
 use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
@@ -13,20 +13,8 @@ use lsp_types::{
 
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
 use ropey::{Rope, RopeSlice};
-use serde::Deserialize;
 
-#[derive(Deserialize, Default)]
-struct Data {
-    words: Vec<Word>,
-}
-
-#[derive(Deserialize, Default, Debug)]
-struct Word {
-    doc: String,
-    token: String,
-    stack: String,
-    help: String,
-}
+use crate::words::{Word, Words};
 
 trait WordAtChar {
     fn word_at_char(&self, char: usize) -> RopeSlice;
@@ -34,11 +22,11 @@ trait WordAtChar {
 impl WordAtChar for Rope {
     fn word_at_char(&self, chix: usize) -> RopeSlice {
         let mut min = chix;
-        while min < self.len_chars() && !self.char(min).is_whitespace() {
+        while min > 0 && min < self.len_chars() && !self.char(min - 1).is_whitespace() {
             min -= 1;
         }
         let mut max = chix;
-        while max < self.len_chars() && !self.char(max).is_whitespace() {
+        while max < self.len_chars() && !self.char(max + 1).is_whitespace() {
             max += 1;
         }
         self.slice(min..max)
@@ -80,11 +68,8 @@ fn main_loop(
     eprintln!("Starting main loop");
     let _params: InitializeParams =
         serde_json::from_value(params).expect("Must be able to deserialize the InitializeParams");
-    let filename = "/home/alexander/github.com/forth-lsp/data/forth-standard.org/core.toml";
-    let contents = fs::read_to_string(filename)?;
-    let data: Data = toml::from_str(&contents)?;
     let mut files = HashMap::<String, Rope>::new();
-    // find matching token, build from token stack & help (doc?)
+    let data = Words::default();
     for msg in &connection.receiver {
         match msg {
             Message::Request(req) => {
@@ -102,15 +87,25 @@ fn main_loop(
                             .line_to_char(params.text_document_position.position.line as usize)
                             + params.text_document_position.position.character as usize;
                         if ix >= rope.len_chars() {
-                            // never go out of bounds
-                            ix = rope.len_chars() - 1;
-                        } else {
-                            // as we're now most likely on a space
-                            // trigger on the just-now typed char
-                            ix -= 1;
+                            return Err(format!("OUT OF BOUNDS! ix {}", ix).into());
                         }
-                        let word = rope.word_at_char(ix).to_string().trim().to_string();
-                        let result = if word.len() > 0 {
+                        if let Some(char_at_ix) = rope.get_char(ix) {
+                            if char_at_ix.is_whitespace() {
+                                eprintln!("Found space, moving back");
+                                // We are currently typing a word, and we're now on a space
+                                ix -= 1;
+                            } else {
+                                eprintln!("Not on space");
+                            }
+                        }
+                        let word = rope.word_at_char(ix);
+                        eprintln!("Found word {}", word);
+                        let use_lower = if let Some(chr) = word.get_char(0) {
+                            chr.is_lowercase()
+                        } else {
+                            false
+                        };
+                        let result = if word.len_chars() > 0 {
                             let mut ret = vec![];
                             let candidates = data.words.iter().filter(|x| {
                                 x.token
@@ -118,8 +113,14 @@ fn main_loop(
                                     .starts_with(word.to_string().to_lowercase().as_str())
                             });
                             for candidate in candidates {
+                                let label = candidate.token.to_owned();
+                                let label = if use_lower {
+                                    label.to_lowercase()
+                                } else {
+                                    label
+                                };
                                 ret.push(CompletionItem {
-                                    label: candidate.token.to_owned(),
+                                    label,
                                     detail: Some(candidate.stack.to_owned()),
                                     documentation: Some(lsp_types::Documentation::MarkupContent(
                                         lsp_types::MarkupContent {
@@ -165,7 +166,7 @@ fn main_loop(
                             as usize;
                         let word = word_on_and_before_cursor(rope, ix);
                         let result = if word.len() > 0 {
-                            let default_info = Word::default();
+                            let default_info = &Word::default();
                             let info = data
                                 .words
                                 .iter()
