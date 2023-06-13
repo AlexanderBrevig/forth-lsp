@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
     // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
-    let server_capabilities = serde_json::to_value(&ServerCapabilities {
+    let server_capabilities = serde_json::to_value(ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Kind(
             TextDocumentSyncKind::INCREMENTAL,
         )),
@@ -208,16 +208,15 @@ fn main_loop(
                             return Err(format!("OUT OF BOUNDS! ix {}", ix).into());
                         }
                         let word = word_on_and_before_cursor(rope, ix);
-                        let result = if word.len() > 0 {
+                        let result = if !word.is_empty() {
                             let default_info = &Word::default();
                             let info = data
                                 .words
                                 .iter()
-                                .filter(|x| {
+                                .find(|x| {
                                     x.token.to_lowercase()
                                         == (word.to_string().to_lowercase().as_str())
                                 })
-                                .nth(0)
                                 .unwrap_or(&default_info);
                             Some(Hover {
                                 contents: lsp_types::HoverContents::Markup(
@@ -272,13 +271,12 @@ fn main_loop(
                         let mut defn_index: i64 = -1;
                         let mut defn = String::new();
                         let mut ret: Vec<Location> = vec![];
-                        let mut chars_iter = rope.chars();
-                        while let Some(next_char) = chars_iter.next() {
+                        //TODO: maintain a map of refs based on change notifications
+                        for next_char in rope.chars() {
                             cur_index += 1;
                             if next_char.is_whitespace() {
-                                if defn.len() > 0 {
+                                if !defn.is_empty() {
                                     if defn.trim() == word {
-                                        //TODO: replace parse input with loop
                                         if let Ok(uri) = Url::parse(
                                             params
                                                 .text_document_position_params
