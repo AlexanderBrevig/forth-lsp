@@ -1,0 +1,10 @@
+[package]
+name = "forth-lexer"
+version = "0.1.0"
+description = "Simple but complete lexer for the forth language"
+license = "MIT"
+repository = "https://github.com/alexanderbrevig/forth-lsp/tree/main/lib/forth-lexer"
+edition = "2021"
+
+[dependencies]
+nom = "7.1.3"

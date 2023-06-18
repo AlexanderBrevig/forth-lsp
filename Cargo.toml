@@ -1,3 +1,6 @@
+[workspace]
+members = ["lib/*"]
+
 [package]
 name = "forth-lsp"
 version = "0.1.1"
