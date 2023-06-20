@@ -1,3 +1,6 @@
+[workspace]
+members = ["lib/*"]
+
 [package]
 name = "forth-lsp"
 version = "0.1.1"
@@ -19,3 +22,4 @@ serde_json = "1.0.96"
 lsp-types = "0.94.0"
 toml = "0.7.4"
 ropey = "1.6.0"
+anyhow = "1.0.71"
