@@ -1,6 +1,9 @@
 mod words;
 use std::collections::HashMap;
 use std::error::Error;
+use std::ffi::OsStr;
+use std::fs::{self, FileType};
+use std::path::Path;
 
 use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
@@ -86,12 +89,20 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Kind(
             TextDocumentSyncKind::INCREMENTAL,
         )),
+        // workspace_symbol_provider
+        workspace: Some(lsp_types::WorkspaceServerCapabilities {
+            workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
+                supported: Some(true),
+                change_notifications: Some(OneOf::Left(false)),
+            }),
+            file_operations: None,
+        }),
         hover_provider: Some(lsp_types::HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         completion_provider: Some(lsp_types::CompletionOptions::default()),
         ..Default::default()
-    })
-    .expect("Must be able to serialize the ServerCapabilities");
+    })?;
+    // .expect("Must be able to serialize the ServerCapabilities");
     let initialization_params = connection.initialize(server_capabilities)?;
     main_loop(connection, initialization_params)?;
     io_threads.join()?;
@@ -106,9 +117,14 @@ fn main_loop(
     params: serde_json::Value,
 ) -> Result<(), Box<dyn Error + Sync + Send>> {
     eprintln!("Starting main loop");
-    let _params: InitializeParams =
-        serde_json::from_value(params).expect("Must be able to deserialize the InitializeParams");
     let mut files = HashMap::<String, Rope>::new();
+    let init: InitializeParams = serde_json::from_value(params)?;
+    if let Some(roots) = init.workspace_folders {
+        eprintln!("Root: {:?}", roots);
+        for root in roots {
+            load_dir(root.uri.path(), &mut files)?;
+        }
+    }
     let data = Words::default();
     for msg in &connection.receiver {
         match msg {
@@ -346,8 +362,12 @@ fn main_loop(
                 match cast_notification::<lsp_types::notification::DidOpenTextDocument>(not.clone())
                 {
                     Ok(params) => {
-                        let rope = Rope::from_str(params.text_document.text.as_str());
-                        files.insert(params.text_document.uri.to_string(), rope);
+                        if let std::collections::hash_map::Entry::Vacant(e) =
+                            files.entry(params.text_document.uri.to_string())
+                        {
+                            let rope = Rope::from_str(params.text_document.text.as_str());
+                            e.insert(rope);
+                        }
                         continue;
                     }
                     Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
@@ -371,6 +391,28 @@ fn main_loop(
                         }
                     }
                     Err(_) => todo!(),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_dir(
+    root: &str, //lsp_types::WorkspaceFolder,
+    files: &mut HashMap<String, Rope>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if let Ok(paths) = fs::read_dir(root) {
+        for path in paths {
+            if let Some(entry) = path?.path().to_str() {
+                if fs::metadata(entry)?.is_dir() {
+                    load_dir(entry, files)?;
+                } else if Path::new(entry).extension().and_then(OsStr::to_str) == Some("forth") {
+                    eprintln!("FORTH load {}", entry);
+                    let raw_content = fs::read(entry)?;
+                    let content = String::from_utf8_lossy(&raw_content);
+                    let rope = Rope::from_str(&content);
+                    files.insert(entry.to_string(), rope);
                 }
             }
         }
