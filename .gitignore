@@ -1,1 +1,5 @@
 /target
+
+# files used to test the LSP locally
+fib.forth
+other.forth
