@@ -1,6 +1,6 @@
 [package]
 name = "forth-lexer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Simple but complete lexer for the forth language"
 license = "MIT"
 repository = "https://github.com/alexanderbrevig/forth-lsp/tree/main/lib/forth-lexer"
