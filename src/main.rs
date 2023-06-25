@@ -1,10 +1,19 @@
+mod error;
+mod prelude;
+mod utils;
 mod words;
+
+use crate::prelude::*;
+use crate::utils::ropey_get_ix::GetIx;
+use crate::utils::ropey_word_at_char::WordAtChar;
+use crate::words::{Word, Words};
+
 use std::collections::HashMap;
-use std::error::Error;
 use std::ffi::OsStr;
-use std::fs::{self, FileType};
+use std::fs;
 use std::path::Path;
 
+use forth_lexer::parser::Lexer;
 use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
@@ -15,68 +24,9 @@ use lsp_types::{
 };
 
 use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
-use ropey::{Rope, RopeSlice};
+use ropey::Rope;
 
-use crate::words::{Word, Words};
-
-trait WordAtChar {
-    fn word_at_char(&self, char: usize) -> RopeSlice;
-}
-impl WordAtChar for Rope {
-    fn word_at_char(&self, chix: usize) -> RopeSlice {
-        if self.char(chix).is_whitespace() {
-            return self.slice(chix..chix);
-        }
-        let mut min = chix;
-        while min > 0 && min < self.len_chars() && !self.char(min - 1).is_whitespace() {
-            min -= 1;
-        }
-        let mut max = chix;
-        while max < self.len_chars() && !self.char(max + 1).is_whitespace() {
-            max += 1;
-        }
-        self.slice(min..(max + 1))
-    }
-}
-#[cfg(test)]
-mod tests {
-    use ropey::Rope;
-
-    use crate::WordAtChar;
-
-    #[test]
-    fn word_at_center() {
-        let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(8);
-        assert_eq!("find", word);
-    }
-    #[test]
-    fn word_at_begin() {
-        let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(7);
-        assert_eq!("find", word);
-    }
-    #[test]
-    fn word_at_end() {
-        let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(10);
-        assert_eq!("find", word);
-    }
-    #[test]
-    fn word_at_after() {
-        let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(11);
-        assert_eq!("", word);
-    }
-    #[test]
-    fn word_at_single() {
-        let rope = Rope::from_str("Should + find this");
-        let word = rope.word_at_char(7);
-        assert_eq!("+", word);
-    }
-}
-
-fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
+fn main() -> Result<()> {
     // Note that  we must have our logging only write out to stderr.
     eprintln!("starting generic LSP server");
 
@@ -102,7 +52,6 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
         completion_provider: Some(lsp_types::CompletionOptions::default()),
         ..Default::default()
     })?;
-    // .expect("Must be able to serialize the ServerCapabilities");
     let initialization_params = connection.initialize(server_capabilities)?;
     main_loop(connection, initialization_params)?;
     io_threads.join()?;
@@ -112,10 +61,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
-fn main_loop(
-    connection: Connection,
-    params: serde_json::Value,
-) -> Result<(), Box<dyn Error + Sync + Send>> {
+fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     eprintln!("Starting main loop");
     let mut files = HashMap::<String, Rope>::new();
     let init: InitializeParams = serde_json::from_value(params)?;
@@ -139,19 +85,13 @@ fn main_loop(
                         let rope = files
                             .get_mut(&params.text_document_position.text_document.uri.to_string())
                             .expect("Must be able to get rope for lang");
-                        let mut ix = rope
-                            .line_to_char(params.text_document_position.position.line as usize)
-                            + params.text_document_position.position.character as usize;
+                        let mut ix = rope.get_ix(&params);
                         if ix >= rope.len_chars() {
-                            return Err(format!("OUT OF BOUNDS! ix {}", ix).into());
+                            return Err(Error::OutOfBounds(ix));
                         }
                         if let Some(char_at_ix) = rope.get_char(ix) {
-                            if char_at_ix.is_whitespace() {
-                                eprintln!("Found space, moving back");
-                                // We are currently typing a word, and we're now on a space
+                            if char_at_ix.is_whitespace() && ix > 0 {
                                 ix -= 1;
-                            } else {
-                                eprintln!("Not on space");
                             }
                         }
                         let word = rope.word_at_char(ix);
@@ -198,11 +138,14 @@ fn main_loop(
                             result: Some(result),
                             error: None,
                         };
-                        connection.sender.send(Message::Response(resp))?;
+                        connection
+                            .sender
+                            .send(Message::Response(resp))
+                            .map_err(|err| Error::SendError(err.to_string()))?;
                         continue;
                     }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(req)) => req,
+                    Err(Error::ExtractRequestError(req)) => req,
+                    Err(err) => panic!("{err:?}"),
                 };
                 match cast::<HoverRequest>(req.clone()) {
                     Ok((id, params)) => {
@@ -216,14 +159,11 @@ fn main_loop(
                                     .to_string(),
                             )
                             .expect("Must be able to get rope for lang");
-                        let ix = rope.line_to_char(
-                            params.text_document_position_params.position.line as usize,
-                        ) + params.text_document_position_params.position.character
-                            as usize;
+                        let ix = rope.get_ix(&params);
                         if ix >= rope.len_chars() {
-                            return Err(format!("OUT OF BOUNDS! ix {}", ix).into());
+                            return Err(Error::OutOfBounds(ix));
                         }
-                        let word = word_on_and_before_cursor(rope, ix);
+                        let word = word_on_or_before_cursor(rope, ix);
                         let result = if !word.is_empty() {
                             let default_info = &Word::default();
                             let info = data
@@ -256,11 +196,16 @@ fn main_loop(
                             result: Some(result),
                             error: None,
                         };
-                        connection.sender.send(Message::Response(resp))?;
+                        connection
+                            .sender
+                            .send(Message::Response(resp))
+                            .map_err(|err| Error::SendError(err.to_string()))?;
                         continue;
                     }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(req)) => req,
+                    Err(Error::ExtractRequestError(req)) => req,
+                    Err(err) => panic!("{err:?}"),
+                    // Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    // Err(ExtractError::MethodMismatch(req)) => req,
                 };
                 match cast::<GotoDefinition>(req) {
                     Ok((id, params)) => {
@@ -268,6 +213,11 @@ fn main_loop(
                         //TODO: recurse parse follow includes /^[iI][nN][cC][lL][uU][dD][eE] +(.*\..*)/
                         //TODO: find colon defines /: +(?:.|\n)*;/
                         //TODO: generate Vec<Location> from line num and col from the matching <file(s)>
+                        let mut ret: Vec<Location> = vec![];
+                        eprintln!(
+                            "{:?}",
+                            &params.text_document_position_params.text_document.uri
+                        );
                         let rope = files
                             .get_mut(
                                 &params
@@ -277,65 +227,77 @@ fn main_loop(
                                     .to_string(),
                             )
                             .expect("Must be able to get rope for lang");
-                        let ix = rope.line_to_char(
-                            params.text_document_position_params.position.line as usize,
-                        ) + params.text_document_position_params.position.character
-                            as usize;
-                        let word = word_on_and_before_cursor(rope, ix);
-
-                        let mut cur_index = 0;
-                        let mut defn_index: i64 = -1;
-                        let mut defn = String::new();
-                        let mut ret: Vec<Location> = vec![];
-                        //TODO: maintain a map of refs based on change notifications
-                        for next_char in rope.chars() {
-                            cur_index += 1;
-                            if next_char.is_whitespace() {
-                                if !defn.is_empty() {
-                                    if defn.trim() == word {
-                                        if let Ok(uri) = Url::parse(
-                                            params
-                                                .text_document_position_params
-                                                .text_document
-                                                .uri
-                                                .as_str(),
-                                        ) {
-                                            let start_line_nr =
-                                                rope.char_to_line(defn_index as usize);
-                                            let start_line_index = defn_index as u32
-                                                - rope.line_to_char(start_line_nr) as u32;
-                                            let defn_len = rope
-                                                .chars()
-                                                .skip(defn_index as usize)
-                                                .take_while(|x| *x != ';')
-                                                .count()
-                                                + 1;
-                                            let end_defn_index = defn_index as usize + defn_len;
-                                            let end_line_nr = rope.char_to_line(end_defn_index - 1);
-                                            let end_line_index =
-                                                end_defn_index - rope.line_to_char(end_line_nr);
-                                            ret.push(Location {
-                                                uri,
-                                                range: Range {
-                                                    start: Position {
-                                                        line: start_line_nr as u32,
-                                                        character: start_line_index,
-                                                    },
-                                                    end: Position {
-                                                        line: end_line_nr as u32,
-                                                        character: end_line_index as u32,
-                                                    },
-                                                },
-                                            });
+                        let ix = rope.get_ix(&params);
+                        if ix >= rope.len_chars() {
+                            eprintln!(
+                                "IX OUT OF BOUNDS {} {} {}",
+                                ix,
+                                rope.len_chars(),
+                                rope.len_bytes()
+                            );
+                            break;
+                        }
+                        let word = word_on_or_before_cursor(rope, ix);
+                        for (file, rope) in files.iter() {
+                            eprintln!("Word: {}", word);
+                            let progn = rope.to_string();
+                            let mut lexer = Lexer::new(progn.as_str());
+                            let tokens = lexer.parse();
+                            let bind1 = tokens.clone();
+                            let mut start_line = 0u32;
+                            let mut start_char = 0u32;
+                            let mut end_line = 0u32;
+                            let mut end_char = 0u32;
+                            let mut found_defn = false;
+                            for (x, y) in tokens.into_iter().zip(bind1.iter().skip(1)) {
+                                if let forth_lexer::token::Token::Colon(x_dat) = x {
+                                    if let forth_lexer::token::Token::Word(y_dat) = y {
+                                        if y_dat.value.eq_ignore_ascii_case(word.as_str()) {
+                                            eprintln!("Found word defn {:?}", y_dat);
+                                            start_line = rope.char_to_line(x_dat.start) as u32;
+                                            start_char = (x_dat.start
+                                                - rope.line_to_char(start_line as usize))
+                                                as u32;
+                                            found_defn = true;
+                                        } else {
+                                            found_defn = false;
                                         }
                                     }
-                                    defn_index = -1;
                                 }
-                                defn.clear();
-                            } else if next_char == ':' {
-                                defn_index = (cur_index - 1) as i64;
-                            } else if defn_index != -1 && !next_char.is_whitespace() {
-                                defn.push(next_char);
+                                if let forth_lexer::token::Token::Semicolon(y_dat) = y {
+                                    if found_defn {
+                                        eprintln!("found end {:?}", y_dat);
+                                        end_line = rope.char_to_line(y_dat.end) as u32;
+                                        end_char = (y_dat.end
+                                            - rope.line_to_char(end_line as usize))
+                                            as u32;
+                                        break;
+                                    }
+                                }
+                            }
+                            eprintln!("GOT HERE");
+                            if (start_line, start_char) != (end_line, end_char) {
+                                eprintln!(
+                                    "{} {} {} {}",
+                                    start_line, start_char, end_line, end_char
+                                );
+                                if let Ok(uri) = Url::from_file_path(file) {
+                                    ret.push(Location {
+                                        uri,
+                                        range: Range {
+                                            start: Position {
+                                                line: start_line,
+                                                character: start_char,
+                                            },
+                                            end: Position {
+                                                line: end_line,
+                                                character: end_char,
+                                            },
+                                        },
+                                    });
+                                } else {
+                                    eprintln!("Failed to parse URI for {}", file);
+                                }
                             }
                         }
                         let result = Some(GotoDefinitionResponse::Array(ret));
@@ -346,11 +308,16 @@ fn main_loop(
                             result: Some(result),
                             error: None,
                         };
-                        connection.sender.send(Message::Response(resp))?;
+                        connection
+                            .sender
+                            .send(Message::Response(resp))
+                            .map_err(|err| Error::SendError(err.to_string()))?;
                         continue;
                     }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(req)) => req,
+                    Err(Error::ExtractRequestError(req)) => req,
+                    Err(err) => panic!("{err:?}"),
+                    // Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    // Err(ExtractError::MethodMismatch(req)) => req,
                 };
                 // ...
             }
@@ -370,8 +337,10 @@ fn main_loop(
                         }
                         continue;
                     }
-                    Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
-                    Err(ExtractError::MethodMismatch(not)) => not,
+                    Err(Error::ExtractNotificationError(req)) => req,
+                    Err(err) => panic!("{err:?}"),
+                    // Err(err @ ExtractError::JsonError { .. }) => panic!("{err:?}"),
+                    // Err(ExtractError::MethodMismatch(not)) => not,
                 };
                 match cast_notification::<lsp_types::notification::DidChangeTextDocument>(
                     not.clone(),
@@ -401,7 +370,7 @@ fn main_loop(
 fn load_dir(
     root: &str, //lsp_types::WorkspaceFolder,
     files: &mut HashMap<String, Rope>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<()> {
     if let Ok(paths) = fs::read_dir(root) {
         for path in paths {
             if let Some(entry) = path?.path().to_str() {
@@ -420,12 +389,16 @@ fn load_dir(
     Ok(())
 }
 
-fn word_on_and_before_cursor(rope: &mut Rope, ix: usize) -> String {
+fn word_on_or_before_cursor(rope: &Rope, ix: usize) -> String {
     let word_on_cursor = rope.word_at_char(ix);
     // with helix, you typically end up with having a selected word including the previous space
     // this means we should also look for a word behind the cursor
     //TODO: make look-behind cleaner
-    let word_behind_cursor = rope.word_at_char(ix - 1);
+    let word_behind_cursor = if ix > 0 {
+        rope.word_at_char(ix - 1)
+    } else {
+        word_on_cursor
+    };
     eprintln!(
         "Word on `{}` before `{}`",
         word_on_cursor, word_behind_cursor
@@ -438,18 +411,20 @@ fn word_on_and_before_cursor(rope: &mut Rope, ix: usize) -> String {
     word.to_string()
 }
 
-fn cast<R>(req: Request) -> Result<(RequestId, R::Params), ExtractError<Request>>
+fn cast<R>(req: Request) -> Result<(RequestId, R::Params)>
 where
     R: lsp_types::request::Request,
     R::Params: serde::de::DeserializeOwned,
 {
     req.extract(R::METHOD)
+        .map_err(error::Error::ExtractRequestError)
 }
 
-fn cast_notification<N>(req: Notification) -> Result<N::Params, ExtractError<Notification>>
+fn cast_notification<N>(req: Notification) -> Result<N::Params>
 where
     N: lsp_types::notification::Notification,
     N::Params: serde::de::DeserializeOwned,
 {
     req.extract(N::METHOD)
+        .map_err(error::Error::ExtractNotificationError)
 }

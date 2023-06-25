@@ -1,15 +1,29 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::RangeBounds};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default, Copy, Clone)]
 pub struct Data<T> {
-    pub line: usize,
-    pub col: isize,
     pub start: usize,
     pub end: usize,
     pub value: T,
 }
 
-#[derive(Debug, PartialEq)]
+impl<T> Data<T> {
+    pub fn new(start: usize, end: usize, value: T) -> Data<T> {
+        Data::<T> { start, end, value }
+    }
+}
+
+impl<T> RangeBounds<usize> for &Data<T> {
+    fn start_bound(&self) -> std::ops::Bound<&usize> {
+        std::ops::Bound::Included(&self.start)
+    }
+
+    fn end_bound(&self) -> std::ops::Bound<&usize> {
+        std::ops::Bound::Excluded(&self.end)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Illegal(Data<char>),
     Eof(Data<char>),
@@ -49,14 +63,10 @@ impl From<Data<char>> for Token {
 
 impl From<Data<String>> for Token {
     fn from(value: Data<String>) -> Self {
-        match value.value.as_str() {
-            _ => {
-                if value.value.chars().all(|b| b.is_ascii_digit()) {
-                    Self::Number(value)
-                } else {
-                    Self::Word(value)
-                }
-            }
+        if value.value.chars().all(|b| b.is_ascii_digit()) {
+            Self::Number(value)
+        } else {
+            Self::Word(value)
         }
     }
 }

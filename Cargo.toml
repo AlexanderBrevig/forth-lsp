@@ -23,3 +23,8 @@ lsp-types = "0.94.0"
 toml = "0.7.4"
 ropey = "1.6.0"
 anyhow = "1.0.71"
+thiserror = "1.0.40"
+
+[dependencies.forth-lexer]
+path = "lib/forth-lexer"
+features = ["ropey"]
