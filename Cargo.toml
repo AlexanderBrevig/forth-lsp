@@ -26,5 +26,6 @@ anyhow = "1.0.71"
 thiserror = "1.0.40"
 
 [dependencies.forth-lexer]
+version = "0.1.0"
 path = "lib/forth-lexer"
 features = ["ropey"]
