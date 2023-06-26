@@ -1,5 +1,6 @@
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[allow(dead_code)]
     #[error("Generic {0}")]
     Generic(String),
     #[error("SendError {0}")]
