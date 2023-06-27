@@ -7,6 +7,8 @@ pub enum Error {
     SendError(String),
     #[error("OutOfBounds at ix {0}")]
     OutOfBounds(usize),
+    #[error("NoSuchFile {0}")]
+    NoSuchFile(String),
 
     #[error(transparent)]
     IO(#[from] std::io::Error),

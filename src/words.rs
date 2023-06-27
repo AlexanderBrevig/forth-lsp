@@ -10,6 +10,12 @@ pub struct Words<'a> {
     pub words: Vec<&'a Word<'a>>,
 }
 
+impl<'a> Word<'a> {
+    pub fn documentation(&self) -> String {
+        format!("# `{}`   `{}`\n\n{}", self.token, self.stack, self.help)
+    }
+}
+
 impl Default for Words<'_> {
     fn default() -> Words<'static> {
         Words {

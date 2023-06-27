@@ -1,10 +1,10 @@
 use ropey::{Rope, RopeSlice};
 
-pub trait WordAtChar {
-    fn word_at_char(&self, char: usize) -> RopeSlice;
+pub trait WordAt {
+    fn word_at(&self, char: usize) -> RopeSlice;
 }
-impl WordAtChar for Rope {
-    fn word_at_char(&self, chix: usize) -> RopeSlice {
+impl WordAt for Rope {
+    fn word_at(&self, chix: usize) -> RopeSlice {
         if self.char(chix).is_whitespace() {
             return self.slice(chix..chix);
         }
@@ -19,6 +19,7 @@ impl WordAtChar for Rope {
         self.slice(min..(max + 1))
     }
 }
+
 #[cfg(test)]
 mod tests {
     use ropey::Rope;
@@ -28,37 +29,37 @@ mod tests {
     #[test]
     fn word_at_zero() {
         let rope = Rope::from_str("find the first word");
-        let word = rope.word_at_char(0);
+        let word = rope.word_at(0);
         assert_eq!("find", word);
     }
     #[test]
     fn word_at_center() {
         let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(8);
+        let word = rope.word_at(8);
         assert_eq!("find", word);
     }
     #[test]
     fn word_at_begin() {
         let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(7);
+        let word = rope.word_at(7);
         assert_eq!("find", word);
     }
     #[test]
     fn word_at_end() {
         let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(10);
+        let word = rope.word_at(10);
         assert_eq!("find", word);
     }
     #[test]
     fn word_at_after() {
         let rope = Rope::from_str("Should find this");
-        let word = rope.word_at_char(11);
+        let word = rope.word_at(11);
         assert_eq!("", word);
     }
     #[test]
     fn word_at_single() {
         let rope = Rope::from_str("Should + find this");
-        let word = rope.word_at_char(7);
+        let word = rope.word_at(7);
         assert_eq!("+", word);
     }
 }
