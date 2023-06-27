@@ -1,19 +1,19 @@
 use std::{fmt::Display, ops::RangeBounds};
 
 #[derive(Debug, PartialEq, Default, Copy, Clone)]
-pub struct Data<T> {
+pub struct Data<'a> {
     pub start: usize,
     pub end: usize,
-    pub value: T,
+    pub value: &'a str,
 }
 
-impl<T> Data<T> {
-    pub fn new(start: usize, end: usize, value: T) -> Data<T> {
-        Data::<T> { start, end, value }
+impl<'a> Data<'a> {
+    pub fn new(start: usize, end: usize, value: &'a str) -> Data {
+        Data { start, end, value }
     }
 }
 
-impl<T> RangeBounds<usize> for &Data<T> {
+impl<'a> RangeBounds<usize> for &Data<'a> {
     fn start_bound(&self) -> std::ops::Bound<&usize> {
         std::ops::Bound::Included(&self.start)
     }
@@ -24,18 +24,33 @@ impl<T> RangeBounds<usize> for &Data<T> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    Illegal(Data<char>),
-    Eof(Data<char>),
-    Colon(Data<char>),
-    Semicolon(Data<char>),
-    Word(Data<String>),
-    Number(Data<String>),
-    Comment(Data<String>),
-    StackComment(Data<String>),
+pub enum Token<'a> {
+    Illegal(Data<'a>),
+    Eof(Data<'a>),
+    Colon(Data<'a>),
+    Semicolon(Data<'a>),
+    Word(Data<'a>),
+    Number(Data<'a>),
+    Comment(Data<'a>),
+    StackComment(Data<'a>),
 }
 
-impl Display for Token {
+impl<'a> Token<'a> {
+    pub fn get_data(&self) -> &Data<'a> {
+        match self {
+            Token::Illegal(dat) => dat,
+            Token::Eof(dat) => dat,
+            Token::Colon(dat) => dat,
+            Token::Semicolon(dat) => dat,
+            Token::Word(dat) => dat,
+            Token::Number(dat) => dat,
+            Token::Comment(dat) => dat,
+            Token::StackComment(dat) => dat,
+        }
+    }
+}
+
+impl<'a> Display for Token<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Illegal(_) => write!(f, ""),
@@ -50,23 +65,19 @@ impl Display for Token {
     }
 }
 
-impl From<Data<char>> for Token {
-    fn from(ch: Data<char>) -> Self {
-        match ch.value {
-            ';' => Self::Semicolon(ch),
-            ':' => Self::Colon(ch),
-            '\0' => Self::Eof(ch),
-            _ => Self::Illegal(ch),
-        }
-    }
-}
-
-impl From<Data<String>> for Token {
-    fn from(value: Data<String>) -> Self {
-        if value.value.chars().all(|b| b.is_ascii_digit()) {
-            Self::Number(value)
-        } else {
-            Self::Word(value)
+impl<'a> From<Data<'a>> for Token<'a> {
+    fn from(value: Data<'a>) -> Self {
+        match value.value {
+            ";" => Self::Semicolon(value),
+            ":" => Self::Colon(value),
+            "\0" => Self::Eof(value),
+            _ => {
+                if value.value.chars().all(|b| b.is_ascii_digit()) {
+                    Self::Number(value)
+                } else {
+                    Self::Word(value)
+                }
+            }
         }
     }
 }

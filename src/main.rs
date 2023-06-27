@@ -4,6 +4,9 @@ mod utils;
 mod words;
 
 use crate::prelude::*;
+
+use crate::utils::data_to_position::ToPosition;
+use crate::utils::find_variant_sublists_from_to::FindVariantSublistsFromTo;
 use crate::utils::ropey_get_ix::GetIx;
 use crate::utils::ropey_word_at_char::WordAtChar;
 use crate::words::{Word, Words};
@@ -11,19 +14,20 @@ use crate::words::{Word, Words};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::mem::discriminant;
 use std::path::Path;
 
 use forth_lexer::parser::Lexer;
+use forth_lexer::token::{Data, Token};
 use lsp_types::request::{Completion, HoverRequest};
 use lsp_types::{
     request::GotoDefinition, GotoDefinitionResponse, InitializeParams, ServerCapabilities,
 };
 use lsp_types::{
-    CompletionItem, CompletionResponse, Hover, Location, OneOf, Position, Range,
-    TextDocumentSyncKind, Url,
+    CompletionItem, CompletionResponse, Hover, Location, OneOf, Range, TextDocumentSyncKind, Url,
 };
 
-use lsp_server::{Connection, ExtractError, Message, Notification, Request, RequestId, Response};
+use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use ropey::Rope;
 
 fn main() -> Result<()> {
@@ -103,6 +107,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                         };
                         let result = if word.len_chars() > 0 {
                             let mut ret = vec![];
+                            //TODO:
                             let candidates = data.words.iter().filter(|x| {
                                 x.token
                                     .to_lowercase()
@@ -243,56 +248,21 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                             let progn = rope.to_string();
                             let mut lexer = Lexer::new(progn.as_str());
                             let tokens = lexer.parse();
-                            let bind1 = tokens.clone();
-                            let mut start_line = 0u32;
-                            let mut start_char = 0u32;
-                            let mut end_line = 0u32;
-                            let mut end_char = 0u32;
-                            let mut found_defn = false;
-                            for (x, y) in tokens.into_iter().zip(bind1.iter().skip(1)) {
-                                if let forth_lexer::token::Token::Colon(x_dat) = x {
-                                    if let forth_lexer::token::Token::Word(y_dat) = y {
-                                        if y_dat.value.eq_ignore_ascii_case(word.as_str()) {
-                                            eprintln!("Found word defn {:?}", y_dat);
-                                            start_line = rope.char_to_line(x_dat.start) as u32;
-                                            start_char = (x_dat.start
-                                                - rope.line_to_char(start_line as usize))
-                                                as u32;
-                                            found_defn = true;
-                                        } else {
-                                            found_defn = false;
-                                        }
-                                    }
-                                }
-                                if let forth_lexer::token::Token::Semicolon(y_dat) = y {
-                                    if found_defn {
-                                        eprintln!("found end {:?}", y_dat);
-                                        end_line = rope.char_to_line(y_dat.end) as u32;
-                                        end_char = (y_dat.end
-                                            - rope.line_to_char(end_line as usize))
-                                            as u32;
-                                        break;
-                                    }
-                                }
-                            }
-                            eprintln!("GOT HERE");
-                            if (start_line, start_char) != (end_line, end_char) {
-                                eprintln!(
-                                    "{} {} {} {}",
-                                    start_line, start_char, end_line, end_char
-                                );
+
+                            for result in tokens.find_variant_sublists_from_to(
+                                discriminant(&Token::Colon(Data::default())),
+                                discriminant(&Token::Semicolon(Data::default())),
+                            ) {
+                                eprintln!("{:?}", result);
+                                let tok = Token::Illegal(Data::new(0, 0, ""));
+                                let begin = result.first().unwrap_or(&tok).get_data();
+                                let end = result.last().unwrap_or(&tok).get_data();
                                 if let Ok(uri) = Url::from_file_path(file) {
                                     ret.push(Location {
                                         uri,
                                         range: Range {
-                                            start: Position {
-                                                line: start_line,
-                                                character: start_char,
-                                            },
-                                            end: Position {
-                                                line: end_line,
-                                                character: end_char,
-                                            },
+                                            start: begin.to_position_start(rope),
+                                            end: end.to_position_end(rope),
                                         },
                                     });
                                 } else {
