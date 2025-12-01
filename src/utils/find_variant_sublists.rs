@@ -1,5 +1,6 @@
 use std::mem::{discriminant, Discriminant};
 
+#[allow(dead_code)]
 pub trait FindVariantSublists<T> {
     fn find_variant_sublists(&self, find: Vec<Discriminant<T>>) -> Vec<&[T]>;
 }
@@ -10,8 +11,7 @@ impl<T> FindVariantSublists<T> for Vec<T> {
         for i in 0..self.len() {
             let disc = (0..find.len())
                 .filter(|j| i + j < self.len())
-                .map(|j| discriminant(&self[i + j]) == find[j])
-                .all(|x| x);
+                .all(|j| discriminant(&self[i + j]) == find[j]);
             if disc {
                 ret.push(&self[i..(i + find.len())])
             }

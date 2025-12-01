@@ -1,5 +1,6 @@
 #[derive(Default, Debug)]
 pub struct Word<'a> {
+    #[allow(dead_code)]
     pub doc: &'a str,
     pub token: &'a str,
     pub stack: &'a str,

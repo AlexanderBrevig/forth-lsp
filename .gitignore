@@ -1,5 +1,7 @@
+TODO.md
 /target
 
 # files used to test the LSP locally
+test.forth
 fib.forth
 other.forth

@@ -2,29 +2,98 @@
 use crate::prelude::*;
 use crate::{
     utils::{
+        definition_index::DefinitionIndex,
+        handlers::send_response,
         ropey::{get_ix::GetIx, word_at::WordAt, RopeSliceIsLower},
         HashMapGetForLSPParams,
     },
     words::Words,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use lsp_server::{Connection, Message, Request, Response};
+use lsp_server::{Connection, Request};
 use lsp_types::{request::Completion, CompletionItem, CompletionResponse};
 use ropey::Rope;
 
 use super::cast;
+
+// Extract completion logic for testing
+pub fn get_completions(
+    word_prefix: &str,
+    use_lower: bool,
+    data: &Words,
+    def_index: Option<&DefinitionIndex>,
+) -> Option<CompletionResponse> {
+    if !word_prefix.is_empty() {
+        let mut ret = vec![];
+        let mut user_defined_words = HashSet::new();
+
+        // Add user-defined words from index
+        if let Some(index) = def_index {
+            for word in index.all_words() {
+                if word.to_lowercase().starts_with(&word_prefix.to_lowercase()) {
+                    user_defined_words.insert(word.clone());
+                    let label = if use_lower {
+                        word.to_lowercase()
+                    } else {
+                        word.clone()
+                    };
+                    ret.push(CompletionItem {
+                        label,
+                        detail: Some("user-defined".to_string()),
+                        documentation: None,
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
+        // Add built-in words (skip if overridden by user)
+        let candidates = data.words.iter().filter(|x| {
+            x.token
+                .to_lowercase()
+                .starts_with(&word_prefix.to_lowercase())
+        });
+        for candidate in candidates {
+            // Skip if user has defined this word
+            if user_defined_words.contains(&candidate.token.to_lowercase()) {
+                continue;
+            }
+
+            let label = if use_lower {
+                candidate.token.to_lowercase()
+            } else {
+                candidate.token.to_owned()
+            };
+            ret.push(CompletionItem {
+                label,
+                detail: Some(candidate.stack.to_owned()),
+                documentation: Some(lsp_types::Documentation::MarkupContent(
+                    lsp_types::MarkupContent {
+                        kind: lsp_types::MarkupKind::Markdown,
+                        value: candidate.documentation(),
+                    },
+                )),
+                ..Default::default()
+            });
+        }
+        Some(CompletionResponse::Array(ret))
+    } else {
+        None
+    }
+}
 
 pub fn handle_completion(
     req: &Request,
     connection: &Connection,
     data: &Words,
     files: &mut HashMap<String, Rope>,
+    def_index: &DefinitionIndex,
 ) -> Result<()> {
     match cast::<Completion>(req.clone()) {
         Ok((id, params)) => {
-            eprintln!("#{id}: {params:?}");
+            log_request!(id, params);
             let rope = if let Some(rope) = files.for_position_param(&params.text_document_position)
             {
                 rope
@@ -44,51 +113,241 @@ pub fn handle_completion(
             }
             let word = rope.word_at(ix);
             let result = if word.len_chars() > 0 {
-                eprintln!("Found word {}", word);
+                log_debug!("Found word {}", word);
                 let use_lower = word.is_lowercase();
-                let mut ret = vec![];
-                let candidates = data.words.iter().filter(|x| {
-                    x.token
-                        .to_lowercase()
-                        .starts_with(word.to_string().to_lowercase().as_str())
-                });
-                for candidate in candidates {
-                    let label = candidate.token.to_owned();
-                    let label = if use_lower {
-                        label.to_lowercase()
-                    } else {
-                        label
-                    };
-                    ret.push(CompletionItem {
-                        label,
-                        detail: Some(candidate.stack.to_owned()),
-                        documentation: Some(lsp_types::Documentation::MarkupContent(
-                            lsp_types::MarkupContent {
-                                kind: lsp_types::MarkupKind::Markdown,
-                                value: candidate.documentation(),
-                            },
-                        )),
-                        ..Default::default()
-                    });
-                }
-                Some(CompletionResponse::Array(ret))
+                get_completions(&word.to_string(), use_lower, data, Some(def_index))
             } else {
                 None
             };
-            let result = serde_json::to_value(result)
-                .expect("Must be able to serialize the CompletionResponse");
-            let resp = Response {
-                id,
-                result: Some(result),
-                error: None,
-            };
-            connection
-                .sender
-                .send(Message::Response(resp))
-                .map_err(|err| Error::SendError(err.to_string()))?;
+            send_response(connection, id, result)?;
             Ok(())
         }
         Err(Error::ExtractRequestError(req)) => Err(Error::ExtractRequestError(req)),
-        Err(err) => panic!("{err:?}"),
+        Err(err) => {
+            log_handler_error!("Completion", err);
+            Err(err)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_completion_finds_matching_words() {
+        let words = Words::default();
+        let result = get_completions("DU", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(!items.is_empty());
+            // Should find DUP, 2DUP, ?DUP
+            let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+            assert!(labels.contains(&"DUP".to_string()));
+            assert!(labels.iter().all(|l| l.to_uppercase().starts_with("DU")));
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_respects_lowercase() {
+        let words = Words::default();
+        let result = get_completions("du", true, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(!items.is_empty());
+            // All items should be lowercase when use_lower is true
+            for item in items {
+                assert_eq!(item.label, item.label.to_lowercase());
+                assert!(item.label.starts_with("du"));
+            }
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_respects_uppercase() {
+        let words = Words::default();
+        let result = get_completions("DU", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(!items.is_empty());
+            // Items should keep their original case when use_lower is false
+            let has_uppercase = items
+                .iter()
+                .any(|i| i.label.chars().any(|c| c.is_uppercase()));
+            assert!(has_uppercase);
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_includes_stack_effects() {
+        let words = Words::default();
+        let result = get_completions("SWAP", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            let swap_item = items.iter().find(|i| i.label == "SWAP");
+            assert!(swap_item.is_some());
+
+            let swap = swap_item.unwrap();
+            assert!(swap.detail.is_some());
+            assert_eq!(swap.detail.as_ref().unwrap(), "( x1 x2 -- x2 x1 )");
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_includes_documentation() {
+        let words = Words::default();
+        let result = get_completions("+", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            let plus_item = items.iter().find(|i| i.label == "+");
+            assert!(plus_item.is_some());
+
+            let plus = plus_item.unwrap();
+            assert!(plus.documentation.is_some());
+            if let Some(lsp_types::Documentation::MarkupContent(content)) = &plus.documentation {
+                assert!(content.value.contains("+"));
+            }
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_empty_prefix() {
+        let words = Words::default();
+        let result = get_completions("", false, &words, None);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_completion_no_matches() {
+        let words = Words::default();
+        let result = get_completions("ZZZZNONEXISTENT", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(items.is_empty());
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_single_character() {
+        let words = Words::default();
+        let result = get_completions("+", false, &words, None);
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(!items.is_empty());
+            // Should include +, +!, +LOOP
+            let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+            assert!(labels.contains(&"+".to_string()));
+            assert!(labels.iter().all(|l| l.starts_with("+")));
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_includes_user_defined_words() {
+        use crate::utils::definition_index::DefinitionIndex;
+        use ropey::Rope;
+        use std::env;
+
+        let words = Words::default();
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+
+        index.update_file(
+            &file_path,
+            &Rope::from_str(": myword 1 + ;\n: mytest 2 * ;"),
+        );
+
+        let result = get_completions("my", false, &words, Some(&index));
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+            assert!(labels.contains(&"myword".to_string()));
+            assert!(labels.contains(&"mytest".to_string()));
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_user_defined_overrides_builtin() {
+        use crate::utils::definition_index::DefinitionIndex;
+        use ropey::Rope;
+        use std::env;
+
+        let words = Words::default();
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+
+        // Define a word that exists in built-ins
+        index.update_file(&file_path, &Rope::from_str(": DUP 1 + ;"));
+
+        let result = get_completions("du", false, &words, Some(&index));
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            let dup_items: Vec<&CompletionItem> = items
+                .iter()
+                .filter(|i| i.label.to_lowercase() == "dup")
+                .collect();
+            // Should only have one dup (user-defined takes precedence over built-in DUP)
+            assert_eq!(dup_items.len(), 1);
+            // User-defined should be marked differently
+            let dup = dup_items[0];
+            assert!(dup.detail.is_some());
+            assert!(dup.detail.as_ref().unwrap().contains("user-defined"));
+        } else {
+            panic!("Expected completion array");
+        }
+    }
+
+    #[test]
+    fn test_completion_mixed_builtin_and_user() {
+        use crate::utils::definition_index::DefinitionIndex;
+        use ropey::Rope;
+        use std::env;
+
+        let words = Words::default();
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+
+        index.update_file(&file_path, &Rope::from_str(": myword 1 + ;"));
+
+        let result = get_completions("+", false, &words, Some(&index));
+
+        assert!(result.is_some());
+        if let Some(CompletionResponse::Array(items)) = result {
+            let labels: Vec<String> = items.iter().map(|i| i.label.clone()).collect();
+            // Should have built-in + operators
+            assert!(labels.contains(&"+".to_string()));
+            // Should NOT have myword (doesn't start with +)
+            assert!(!labels.contains(&"myword".to_string()));
+        } else {
+            panic!("Expected completion array");
+        }
     }
 }

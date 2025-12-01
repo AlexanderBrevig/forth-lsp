@@ -3,11 +3,11 @@ use ropey::{Rope, RopeSlice};
 use super::word_at::WordAt;
 
 pub trait WordOnOrBefore {
-    fn word_on_or_before(&self, char: usize) -> RopeSlice;
+    fn word_on_or_before(&self, char: usize) -> RopeSlice<'_>;
 }
 
 impl WordOnOrBefore for Rope {
-    fn word_on_or_before(&self, ix: usize) -> RopeSlice {
+    fn word_on_or_before(&self, ix: usize) -> RopeSlice<'_> {
         let word_on_cursor = self.word_at(ix);
         // with helix, you typically end up with having a selected word including the previous space
         // this means we should also look for a word behind the cursor

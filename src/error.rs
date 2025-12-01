@@ -1,4 +1,5 @@
 #[derive(thiserror::Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum Error {
     #[allow(dead_code)]
     #[error("Generic {0}")]
