@@ -2,10 +2,10 @@
 use crate::prelude::*;
 use crate::{
     utils::{
+        HashMapGetForLSPParams,
         definition_index::DefinitionIndex,
         handlers::send_response,
-        ropey::{get_ix::GetIx, word_at::WordAt, RopeSliceIsLower},
-        HashMapGetForLSPParams,
+        ropey::{RopeSliceIsLower, get_ix::GetIx, word_at::WordAt},
     },
     words::Words,
 };
@@ -13,7 +13,7 @@ use crate::{
 use std::collections::{HashMap, HashSet};
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::Completion, CompletionItem, CompletionResponse};
+use lsp_types::{CompletionItem, CompletionResponse, request::Completion};
 use ropey::Rope;
 
 use super::cast;
@@ -45,7 +45,13 @@ pub fn get_completions(
                     let definitions = index.find_definitions(&word);
                     let (detail, documentation) = if !definitions.is_empty() {
                         let def = &definitions[0];
-                        let file_name = def.uri.path().as_str().split('/').next_back().unwrap_or("unknown");
+                        let file_name = def
+                            .uri
+                            .path()
+                            .as_str()
+                            .split('/')
+                            .next_back()
+                            .unwrap_or("unknown");
 
                         // Try to extract source code like hover does
                         let mut doc_text = format!(
@@ -57,39 +63,39 @@ pub fn get_completions(
 
                         // Extract source code if files are available
                         if let Some(files_map) = files
-                            && let Some(rope) = files_map.get(&def.uri.to_string()) {
-                                let start_line = def.range.start.line as usize;
-                                let end_line = def.range.end.line as usize;
+                            && let Some(rope) = files_map.get(&def.uri.to_string())
+                        {
+                            let start_line = def.range.start.line as usize;
+                            let end_line = def.range.end.line as usize;
 
-                                // For single-line definitions (just the word name), expand to show full definition
-                                let (display_start, display_end) = if start_line == end_line {
-                                    let expanded_end =
-                                        (end_line + 20).min(rope.len_lines().saturating_sub(1));
-                                    (start_line, expanded_end)
-                                } else {
-                                    (start_line, end_line)
-                                };
+                            // For single-line definitions (just the word name), expand to show full definition
+                            let (display_start, display_end) = if start_line == end_line {
+                                let expanded_end =
+                                    (end_line + 20).min(rope.len_lines().saturating_sub(1));
+                                (start_line, expanded_end)
+                            } else {
+                                (start_line, end_line)
+                            };
 
-                                // Extract source code lines
-                                let mut source_lines = Vec::new();
-                                for line_idx in display_start..=display_end.min(display_start + 20)
-                                {
-                                    if let Some(line) = rope.get_line(line_idx) {
-                                        let line_str = line.to_string();
-                                        source_lines.push(line_str.trim_end().to_string());
-                                        // Stop at semicolon for colon definitions
-                                        if line_str.trim_end().ends_with(';') {
-                                            break;
-                                        }
+                            // Extract source code lines
+                            let mut source_lines = Vec::new();
+                            for line_idx in display_start..=display_end.min(display_start + 20) {
+                                if let Some(line) = rope.get_line(line_idx) {
+                                    let line_str = line.to_string();
+                                    source_lines.push(line_str.trim_end().to_string());
+                                    // Stop at semicolon for colon definitions
+                                    if line_str.trim_end().ends_with(';') {
+                                        break;
                                     }
                                 }
-
-                                if !source_lines.is_empty() {
-                                    doc_text.push_str("```forth\n");
-                                    doc_text.push_str(&source_lines.join(""));
-                                    doc_text.push_str("\n```");
-                                }
                             }
+
+                            if !source_lines.is_empty() {
+                                doc_text.push_str("```forth\n");
+                                doc_text.push_str(&source_lines.join(""));
+                                doc_text.push_str("\n```");
+                            }
+                        }
 
                         (
                             Some(format!("user-defined in {}", file_name)),
@@ -172,9 +178,11 @@ pub fn handle_completion(
                 return Err(Error::OutOfBounds(ix));
             }
             if let Some(char_at_ix) = rope.get_char(ix)
-                && char_at_ix.is_whitespace() && ix > 0 {
-                    ix -= 1;
-                }
+                && char_at_ix.is_whitespace()
+                && ix > 0
+            {
+                ix -= 1;
+            }
             let word = rope.word_at(ix);
             let result = if word.len_chars() > 0 {
                 log_debug!("Found word {}", word);

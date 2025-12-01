@@ -8,7 +8,7 @@ use lsp_types::{Location, Range};
 use ropey::Rope;
 
 use super::{
-    data_to_position::{data_range_from_to, ToPosition},
+    data_to_position::{ToPosition, data_range_from_to},
     definition_helpers::find_colon_definitions,
     token_utils::extract_word_name_with_range,
 };
@@ -432,9 +432,10 @@ mod tests {
         let refs = index.find_references("add1");
         // Should find 2 references in file2
         assert_eq!(refs.len(), 2);
-        assert!(refs
-            .iter()
-            .all(|loc| loc.uri.to_string().contains("file2.forth")));
+        assert!(
+            refs.iter()
+                .all(|loc| loc.uri.to_string().contains("file2.forth"))
+        );
     }
 
     #[test]

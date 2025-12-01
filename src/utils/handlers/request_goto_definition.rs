@@ -2,10 +2,10 @@
 use crate::prelude::*;
 use crate::{
     utils::{
+        HashMapGetForLSPParams,
         definition_index::DefinitionIndex,
         handlers::send_response,
         ropey::{get_ix::GetIx, word_on_or_before::WordOnOrBefore},
-        HashMapGetForLSPParams,
     },
     words::Words,
 };
@@ -13,7 +13,7 @@ use crate::{
 use std::collections::HashMap;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::GotoDefinition, GotoDefinitionResponse};
+use lsp_types::{GotoDefinitionResponse, request::GotoDefinition};
 use ropey::Rope;
 
 use super::cast;
@@ -21,10 +21,8 @@ use super::cast;
 // Test-only imports
 #[cfg(test)]
 use crate::utils::{
-    data_to_position::data_range_from_to,
-    definition_helpers::find_colon_definitions,
-    token_utils::extract_word_name,
-    uri_helpers::path_to_uri,
+    data_to_position::data_range_from_to, definition_helpers::find_colon_definitions,
+    token_utils::extract_word_name, uri_helpers::path_to_uri,
 };
 #[cfg(test)]
 use forth_lexer::{

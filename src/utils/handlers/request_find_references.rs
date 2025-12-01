@@ -5,7 +5,7 @@ use crate::utils::handlers::{common::ExtractedPosition, send_response};
 use crate::utils::ropey::word_on_or_before::WordOnOrBefore;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::References, Location};
+use lsp_types::{Location, request::References};
 use ropey::Rope;
 use std::collections::HashMap;
 

@@ -1,4 +1,4 @@
-use std::mem::{discriminant, Discriminant};
+use std::mem::{Discriminant, discriminant};
 
 pub trait FindVariantSublistsFromTo<T> {
     fn find_variant_sublists_from_to(

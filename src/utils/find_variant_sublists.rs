@@ -1,4 +1,4 @@
-use std::mem::{discriminant, Discriminant};
+use std::mem::{Discriminant, discriminant};
 
 #[allow(dead_code)]
 pub trait FindVariantSublists<T> {

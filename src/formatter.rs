@@ -104,8 +104,29 @@ impl Formatter {
         }
     }
 
+    /// Check if a word is a defining word that declares a new symbol
+    fn is_defining_word(word: &str) -> bool {
+        matches!(
+            word.to_uppercase().as_str(),
+            "CONSTANT"
+                | "VARIABLE"
+                | "VALUE"
+                | "2CONSTANT"
+                | "2VARIABLE"
+                | "FVARIABLE"
+                | "CREATE"
+                | "DEFER"
+                | "BUFFER:"
+        )
+    }
+
     /// Format a non-definition token (outside colon definitions)
-    fn format_non_definition_token(&self, token: &Token, output: &mut String) {
+    fn format_non_definition_token(
+        &self,
+        token: &Token,
+        output: &mut String,
+        last_was_defining: &mut bool,
+    ) {
         match token {
             Token::Comment(data) | Token::StackComment(data) => {
                 if !output.is_empty() && !output.ends_with('\n') {
@@ -113,21 +134,41 @@ impl Formatter {
                 }
                 output.push_str(data.value);
                 output.push('\n');
+                *last_was_defining = false;
             }
             Token::Word(data) | Token::Number(data) => {
+                // Check if this is a defining word
+                let is_def_word = if let Token::Word(w) = token {
+                    Self::is_defining_word(w.value)
+                } else {
+                    false
+                };
+
                 if !output.is_empty() && !output.ends_with('\n') {
                     output.push(' ');
                 }
                 output.push_str(data.value);
+
+                // If last token was a defining word, this is the name - add newline after it
+                if *last_was_defining {
+                    output.push('\n');
+                    *last_was_defining = false;
+                } else if is_def_word {
+                    // Mark that next token will be the name
+                    *last_was_defining = true;
+                }
             }
             Token::Semicolon(_) => {
                 output.push_str(" ;");
+                *last_was_defining = false;
             }
             Token::Illegal(_) | Token::Eof(_) => {
                 // Skip
+                *last_was_defining = false;
             }
             Token::Colon(_) => {
                 // Should not be called for colon tokens
+                *last_was_defining = false;
             }
         }
     }
@@ -136,15 +177,21 @@ impl Formatter {
     fn format_tokens_preserve_newlines(&self, tokens: &[Token], source: &str) -> String {
         let mut output = String::new();
         let mut i = 0;
+        let mut last_was_defining = false;
 
         while i < tokens.len() {
             match &tokens[i] {
                 Token::Eof(_) => break,
                 Token::Colon(_) => {
                     i = self.format_preserved_definition(tokens, i, source, &mut output);
+                    last_was_defining = false;
                 }
                 _ => {
-                    self.format_non_definition_token(&tokens[i], &mut output);
+                    self.format_non_definition_token(
+                        &tokens[i],
+                        &mut output,
+                        &mut last_was_defining,
+                    );
                     i += 1;
                 }
             }
@@ -676,5 +723,22 @@ dup ;";
         assert!(formatted.contains("VARIABLE counter"));
         assert!(formatted.contains("100 CONSTANT LIMIT"));
         assert!(formatted.contains(": increment counter @ 1 + counter ! ;"));
+    }
+
+    #[test]
+    fn test_constants_on_separate_lines() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        // Multiple constants on one line should be split
+        let source = "10 CONSTANT MAX 42 CONSTANT ANSWER";
+        let formatted = formatter.format_source(source).unwrap();
+
+        // Each constant should be on its own line
+        assert!(formatted.contains("10 CONSTANT MAX\n"));
+        assert!(formatted.contains("42 CONSTANT ANSWER\n"));
     }
 }

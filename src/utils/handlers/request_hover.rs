@@ -2,11 +2,11 @@
 use crate::prelude::*;
 use crate::{
     utils::{
+        HashMapGetForLSPParams,
         definition_index::DefinitionIndex,
         handlers::send_response,
         ropey::{get_ix::GetIx, word_on_or_before::WordOnOrBefore},
         word_lookup::find_builtin_word,
-        HashMapGetForLSPParams,
     },
     words::{Word, Words},
 };
@@ -14,7 +14,7 @@ use crate::{
 use std::collections::HashMap;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::HoverRequest, Hover};
+use lsp_types::{Hover, request::HoverRequest};
 use ropey::Rope;
 
 use super::cast;
@@ -41,7 +41,13 @@ pub fn get_hover_result(
                     }
 
                     // Add location info
-                    let file_name = def.uri.path().as_str().split('/').next_back().unwrap_or("unknown");
+                    let file_name = def
+                        .uri
+                        .path()
+                        .as_str()
+                        .split('/')
+                        .next_back()
+                        .unwrap_or("unknown");
                     hover_text.push_str(&format!(
                         "**Defined in:** `{}:{}:{}`\n\n",
                         file_name,

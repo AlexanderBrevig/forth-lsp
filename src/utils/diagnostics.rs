@@ -42,9 +42,10 @@ pub fn check_undefined_words(
     let mut local_definitions = HashSet::new();
     for result in find_colon_definitions(&tokens) {
         if result.len() >= 3
-            && let Token::Word(data) = &result[1] {
-                local_definitions.insert(data.value.to_lowercase());
-            }
+            && let Token::Word(data) = &result[1]
+        {
+            local_definitions.insert(data.value.to_lowercase());
+        }
     }
 
     // Add local definitions to defined words
@@ -53,9 +54,28 @@ pub fn check_undefined_words(
     }
 
     // Check all word usages
+    let mut in_string_literal = false;
     for token in &tokens {
         if let Token::Word(data) = token {
             let word_lower = data.value.to_lowercase();
+
+            // Check if this starts a string literal
+            if matches!(word_lower.as_str(), ".\"" | "s\"" | "c\"" | "abort\"") {
+                in_string_literal = true;
+                defined_words.insert(word_lower.clone()); // Ensure string words are defined
+                continue;
+            }
+
+            // Check if this ends a string literal
+            if in_string_literal && data.value.ends_with('"') {
+                in_string_literal = false;
+                continue;
+            }
+
+            // Skip words inside string literals
+            if in_string_literal {
+                continue;
+            }
 
             // Skip if word is defined
             if defined_words.contains(&word_lower) {
@@ -146,29 +166,30 @@ pub fn check_unmatched_delimiters(rope: &Rope) -> Vec<Diagnostic> {
 
     // Report unclosed parentheses
     if paren_depth > 0
-        && let Some(start) = paren_start {
-            let start_pos = Position {
-                line: rope.char_to_line(start) as u32,
-                character: (start - rope.line_to_char(rope.char_to_line(start))) as u32,
-            };
-            diagnostics.push(Diagnostic {
-                range: Range {
-                    start: start_pos,
-                    end: Position {
-                        line: start_pos.line,
-                        character: start_pos.character + 1,
-                    },
+        && let Some(start) = paren_start
+    {
+        let start_pos = Position {
+            line: rope.char_to_line(start) as u32,
+            character: (start - rope.line_to_char(rope.char_to_line(start))) as u32,
+        };
+        diagnostics.push(Diagnostic {
+            range: Range {
+                start: start_pos,
+                end: Position {
+                    line: start_pos.line,
+                    character: start_pos.character + 1,
                 },
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: None,
-                code_description: None,
-                source: Some("forth-lsp".to_string()),
-                message: "Unclosed parenthesis".to_string(),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
-        }
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("forth-lsp".to_string()),
+            message: "Unclosed parenthesis".to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
 
     diagnostics
 }
@@ -249,6 +270,22 @@ mod tests {
     }
 
     #[test]
+    fn test_string_literals_not_flagged() {
+        let rope = Rope::from_str(r#": greet ." Hello world " CR ;"#);
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        // String literal content ("Hello", "world", quotes) should not be flagged
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "String literal content should not be flagged as undefined"
+        );
+    }
+
+    #[test]
     fn test_builtin_words_not_flagged() {
         let rope = Rope::from_str(": test DUP SWAP DROP ;");
         let index = DefinitionIndex::new();
@@ -307,10 +344,12 @@ mod tests {
 
         let diagnostics = get_diagnostics(&rope, &index, &words);
 
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)
-                && d.message.contains("Unmatched closing parenthesis")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)
+                    && d.message.contains("Unmatched closing parenthesis"))
+        );
     }
 
     #[test]
@@ -321,10 +360,12 @@ mod tests {
 
         let diagnostics = get_diagnostics(&rope, &index, &words);
 
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)
-                && d.message.contains("Unclosed parenthesis")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.severity == Some(DiagnosticSeverity::ERROR)
+                    && d.message.contains("Unclosed parenthesis"))
+        );
     }
 
     #[test]
@@ -335,9 +376,11 @@ mod tests {
 
         let diagnostics = get_diagnostics(&rope, &index, &words);
 
-        assert!(!diagnostics
-            .iter()
-            .any(|d| d.message.contains("parenthesis")));
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("parenthesis"))
+        );
     }
 
     #[test]
@@ -357,9 +400,11 @@ mod tests {
         // Verify we have both types of diagnostics
         assert!(diagnostics.iter().any(|d| d.message.contains("undefined1")));
         assert!(diagnostics.iter().any(|d| d.message.contains("undefined2")));
-        assert!(diagnostics
-            .iter()
-            .any(|d| d.message.contains("Unmatched closing parenthesis")));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unmatched closing parenthesis"))
+        );
     }
 
     #[test]

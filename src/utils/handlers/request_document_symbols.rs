@@ -13,7 +13,7 @@ use forth_lexer::{
 };
 use lsp_server::{Connection, Request};
 use lsp_types::{
-    request::DocumentSymbolRequest, DocumentSymbol, DocumentSymbolResponse, SymbolKind,
+    DocumentSymbol, DocumentSymbolResponse, SymbolKind, request::DocumentSymbolRequest,
 };
 use ropey::Rope;
 

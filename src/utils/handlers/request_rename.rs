@@ -10,7 +10,7 @@ use crate::utils::ropey::word_on_or_before::WordOnOrBefore;
 use crate::utils::uri_helpers::path_to_uri;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::Rename, TextEdit, WorkspaceEdit};
+use lsp_types::{TextEdit, WorkspaceEdit, request::Rename};
 use ropey::Rope;
 use std::collections::HashMap;
 

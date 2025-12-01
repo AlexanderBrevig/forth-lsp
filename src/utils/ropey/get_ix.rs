@@ -1,4 +1,4 @@
-use lsp_types::{request::GotoTypeDefinitionParams, CompletionParams, HoverParams};
+use lsp_types::{CompletionParams, HoverParams, request::GotoTypeDefinitionParams};
 use ropey::Rope;
 
 pub trait GetIx<T> {

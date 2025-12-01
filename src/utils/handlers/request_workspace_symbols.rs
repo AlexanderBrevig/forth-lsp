@@ -4,7 +4,7 @@ use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::send_response;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::WorkspaceSymbolRequest, SymbolInformation, SymbolKind};
+use lsp_types::{SymbolInformation, SymbolKind, request::WorkspaceSymbolRequest};
 
 use super::cast;
 

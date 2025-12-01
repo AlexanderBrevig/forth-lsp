@@ -3,7 +3,7 @@ use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::{common::ExtractedPosition, send_response};
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::PrepareRenameRequest, PrepareRenameResponse, Range};
+use lsp_types::{PrepareRenameResponse, Range, request::PrepareRenameRequest};
 use ropey::Rope;
 use std::collections::HashMap;
 

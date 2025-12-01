@@ -6,7 +6,7 @@ use crate::utils::word_lookup::find_builtin_word;
 use crate::words::Words;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::SignatureHelpRequest, SignatureHelp, SignatureInformation};
+use lsp_types::{SignatureHelp, SignatureInformation, request::SignatureHelpRequest};
 use ropey::Rope;
 use std::collections::HashMap;
 
