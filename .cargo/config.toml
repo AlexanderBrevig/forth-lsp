@@ -1,0 +1,9 @@
+# Cargo configuration for forth-lsp workspace
+
+[alias]
+# Convenient alias to run tests for all workspace members
+t = "test --workspace"
+
+# Note: Due to Cargo's design, 'cargo test' without flags only tests
+# the current package. Use 'cargo test --workspace' or 'cargo t' to test
+# both forth-lsp and forth-lexer.

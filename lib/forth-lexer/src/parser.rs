@@ -46,76 +46,13 @@ impl<'a> Lexer<'a> {
         self.skip_whitespace();
 
         let tok = match self.ch {
-            ':' => {
-                let mut dat = self.here();
-                dat.value = &self.raw[self.position..self.read_position];
-                Token::Colon(dat)
-            }
-            ';' => {
-                let mut dat = self.here();
-                dat.value = &self.raw[self.position..self.read_position];
-                dat.end = dat.start + 1;
-                Token::Semicolon(dat)
-            }
-            '%' => {
-                if self.peek_char().is_digit(2) {
-                    let ident = self.read_number();
-                    Token::Number(ident)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '&' => {
-                if self.peek_char() == 'x' || self.peek_char().is_digit(8) {
-                    let ident = self.read_number();
-                    Token::Number(ident)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '$' => {
-                if self.peek_char().is_hex_digit() {
-                    let ident = self.read_number();
-                    Token::Number(ident)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '\'' => {
-                let begin = self.position;
-                if !self.peek_char().is_whitespace() {
-                    self.read_char();
-                    if self.peek_char() == '\'' {
-                        self.read_char();
-                        let number = Data {
-                            start: self.position - 2,
-                            end: self.position + 1,
-                            value: &self.raw[begin..(self.position + 1)],
-                        };
-                        Token::Number(number)
-                    } else {
-                        let mut ident = self.read_ident();
-                        ident.start -= 1;
-                        ident.value = &self.raw[begin..self.position];
-                        Token::Word(ident)
-                    }
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '0' => {
-                if self.peek_char() == 'x' || self.peek_char().is_hex_digit() {
-                    let ident = self.read_number();
-                    Token::Number(ident)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
+            ':' => Token::Colon(self.read_single_char_token()),
+            ';' => Token::Semicolon(self.read_single_char_token()),
+            '%' => self.try_parse_number_with_prefix(|c| c.is_digit(2)),
+            '&' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_digit(8)),
+            '$' => self.try_parse_number_with_prefix(|c| c.is_hex_digit()),
+            '\'' => self.parse_quote_or_word(),
+            '0' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_hex_digit()),
             '0'..='9' => {
                 let ident = self.read_number();
                 Token::Number(ident)
@@ -132,7 +69,12 @@ impl<'a> Lexer<'a> {
             '(' => {
                 if self.peek_char().is_whitespace() {
                     let comment = self.read_comment_to(')');
-                    Token::Comment(comment)
+                    // Stack comments contain '--' to denote stack effects
+                    if comment.value.contains("--") {
+                        Token::StackComment(comment)
+                    } else {
+                        Token::Comment(comment)
+                    }
                 } else {
                     let ident = self.read_ident();
                     Token::Word(ident)
@@ -141,6 +83,7 @@ impl<'a> Lexer<'a> {
             '\0' => {
                 let mut dat = self.here();
                 dat.value = "\0";
+                self.read_char();
                 Token::Eof(dat)
             }
             _ => {
@@ -149,7 +92,6 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        self.read_char();
         Ok(tok)
     }
 
@@ -163,6 +105,53 @@ impl<'a> Lexer<'a> {
 
         self.position = self.read_position;
         self.read_position += 1;
+    }
+
+    fn try_parse_number_with_prefix(&mut self, validator: fn(char) -> bool) -> Token<'a> {
+        if validator(self.peek_char()) {
+            Token::Number(self.read_number())
+        } else {
+            Token::Word(self.read_ident())
+        }
+    }
+
+    fn parse_quote_or_word(&mut self) -> Token<'a> {
+        let begin = self.position;
+        let next = self.peek_char();
+
+        if next.is_whitespace() {
+            return Token::Word(self.read_ident());
+        }
+
+        self.read_char(); // consume character after quote
+
+        if self.peek_char() == '\'' {
+            // Character literal like 'A'
+            self.read_char(); // consume closing quote
+            let number = Data {
+                start: begin,
+                end: self.position + 1,
+                value: &self.raw[begin..(self.position + 1)],
+            };
+            self.read_char(); // move past
+            return Token::Number(number);
+        }
+
+        // Quoted word
+        let mut word = self.read_ident();
+        word.start = begin;
+        word.value = &self.raw[begin..word.end];
+        Token::Word(word)
+    }
+
+    fn read_single_char_token(&mut self) -> Data<'a> {
+        let start = self.position;
+        self.read_char();
+        Data {
+            start,
+            end: start + 1,
+            value: &self.raw[start..start + 1],
+        }
     }
 
     fn peek_char(&mut self) -> char {
@@ -180,13 +169,10 @@ impl<'a> Lexer<'a> {
 
     fn read_comment_to(&mut self, to: char) -> Data<'a> {
         let start = self.position;
-        let mut value = String::new();
-        while self.ch != to {
-            value.push(self.ch);
+        while self.ch != to && self.ch != '\0' {
             self.read_char();
         }
         if to == ')' {
-            value.push(self.ch);
             self.read_char();
         }
 
@@ -199,9 +185,7 @@ impl<'a> Lexer<'a> {
 
     fn read_ident(&mut self) -> Data<'a> {
         let start = self.position;
-        let mut value = String::new();
         while !self.ch.is_whitespace() && self.ch != '\0' {
-            value.push(self.ch);
             self.read_char();
         }
         Data {
@@ -213,7 +197,6 @@ impl<'a> Lexer<'a> {
 
     fn read_number(&mut self) -> Data<'a> {
         let start = self.position;
-        let mut value = String::new();
         //TODO: parse legal forth numbers
         while self.ch.is_hex_digit()
             || self.ch == '_'
@@ -222,7 +205,6 @@ impl<'a> Lexer<'a> {
             || self.ch == 'x'
             || self.ch == '$'
         {
-            value.push(self.ch);
             self.read_char();
         }
         Data {
@@ -234,6 +216,7 @@ impl<'a> Lexer<'a> {
 
     pub fn parse(&mut self) -> Vec<Token<'a>> {
         let mut tokens = vec![];
+        #[allow(irrefutable_let_patterns)]
         while let Ok(tok) = self.next_token() {
             match tok {
                 Token::Eof(_) => {
@@ -258,9 +241,9 @@ mod tests {
         let mut lexer = Lexer::new(": add1 ( n -- n )\n  1 + \\ adds one\n;");
         let tokens = lexer.parse();
         let expected = vec![
-            Colon(Data::new(0, 0, ":")),
+            Colon(Data::new(0, 1, ":")),
             Word(Data::new(2, 6, "add1")),
-            Comment(Data::new(7, 17, "( n -- n )")),
+            StackComment(Data::new(7, 17, "( n -- n )")),
             Number(Data::new(20, 21, "1")),
             Word(Data::new(22, 23, "+")),
             Comment(Data::new(24, 34, "\\ adds one")),
@@ -274,7 +257,7 @@ mod tests {
         let mut lexer = Lexer::new(": add1 1 + ;");
         let tokens = lexer.parse();
         let expected = vec![
-            Colon(Data::new(0, 0, ":")),
+            Colon(Data::new(0, 1, ":")),
             Word(Data::new(2, 6, "add1")),
             Number(Data::new(7, 8, "1")),
             Word(Data::new(9, 10, "+")),
@@ -365,6 +348,42 @@ mod tests {
         let mut lexer = Lexer::new("'c'");
         let tokens = lexer.parse();
         let expected = vec![Number(Data::new(0, 3, "'c'"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_stack_comment() {
+        let mut lexer = Lexer::new("( n1 n2 -- n3 )");
+        let tokens = lexer.parse();
+        let expected = vec![StackComment(Data::new(0, 15, "( n1 n2 -- n3 )"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_regular_comment() {
+        let mut lexer = Lexer::new("( this is just a comment )");
+        let tokens = lexer.parse();
+        let expected = vec![Comment(Data::new(0, 26, "( this is just a comment )"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_stack_comment_complex() {
+        let mut lexer = Lexer::new("( addr len -- addr' len' flag )");
+        let tokens = lexer.parse();
+        let expected = vec![StackComment(Data::new(
+            0,
+            31,
+            "( addr len -- addr' len' flag )",
+        ))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_line_comment() {
+        let mut lexer = Lexer::new("\\ this is a line comment");
+        let tokens = lexer.parse();
+        let expected = vec![Comment(Data::new(0, 24, "\\ this is a line comment"))];
         assert_eq!(tokens, expected)
     }
 

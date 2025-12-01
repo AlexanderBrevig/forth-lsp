@@ -8,7 +8,7 @@ pub struct Data<'a> {
 }
 
 impl<'a> Data<'a> {
-    pub fn new(start: usize, end: usize, value: &'a str) -> Data {
+    pub fn new(start: usize, end: usize, value: &'a str) -> Data<'a> {
         Data { start, end, value }
     }
 }

@@ -1,9 +1,10 @@
 [workspace]
 members = ["lib/*"]
+resolver = "2"
 
 [package]
 name = "forth-lsp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "LSP for the Forth programming language"
@@ -26,6 +27,6 @@ anyhow = "1.0.71"
 thiserror = "1.0.40"
 
 [dependencies.forth-lexer]
-version = "0.1.1"
+version = "0.2.0"
 path = "lib/forth-lexer"
 features = ["ropey"]

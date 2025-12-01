@@ -1,28 +1,48 @@
 #[allow(unused_imports)]
 use crate::prelude::*;
+use crate::utils::definition_index::DefinitionIndex;
+use crate::utils::diagnostics::{get_diagnostics, publish_diagnostics};
+use crate::words::Words;
 
 use std::collections::HashMap;
 
-use lsp_server::Notification;
+use lsp_server::{Connection, Notification};
 use ropey::Rope;
 
 use super::cast_notification;
 
 pub fn handle_did_open_text_document(
     notification: &Notification,
+    connection: &Connection,
     files: &mut HashMap<String, Rope>,
+    def_index: &mut DefinitionIndex,
+    builtin_words: &Words,
 ) -> Result<()> {
     match cast_notification::<lsp_types::notification::DidOpenTextDocument>(notification.clone()) {
         Ok(params) => {
-            if let std::collections::hash_map::Entry::Vacant(e) =
-                files.entry(params.text_document.uri.to_string())
-            {
+            let file_uri = params.text_document.uri.to_string();
+            if let std::collections::hash_map::Entry::Vacant(e) = files.entry(file_uri.clone()) {
                 let rope = Rope::from_str(params.text_document.text.as_str());
+                // Update index for newly opened file
+                def_index.update_file(&file_uri, &rope);
+
+                // Publish diagnostics for the opened file
+                let diagnostics = get_diagnostics(&rope, def_index, builtin_words);
+                publish_diagnostics(
+                    connection,
+                    params.text_document.uri.clone(),
+                    diagnostics,
+                    params.text_document.version,
+                )?;
+
                 e.insert(rope);
             }
             Ok(())
         }
         Err(Error::ExtractNotificationError(req)) => Err(Error::ExtractNotificationError(req)),
-        Err(err) => panic!("{err:?}"),
+        Err(err) => {
+            log_handler_error!("Did open notification", err);
+            Err(err)
+        }
     }
 }
