@@ -24,6 +24,7 @@ pub fn get_completions(
     use_lower: bool,
     data: &Words,
     def_index: Option<&DefinitionIndex>,
+    files: Option<&HashMap<String, Rope>>,
 ) -> Option<CompletionResponse> {
     if !word_prefix.is_empty() {
         let mut ret = vec![];
@@ -39,10 +40,73 @@ pub fn get_completions(
                     } else {
                         word.clone()
                     };
+                    
+                    // Get definitions to extract documentation
+                    let definitions = index.find_definitions(&word);
+                    let (detail, documentation) = if !definitions.is_empty() {
+                        let def = &definitions[0];
+                        let file_name = def.uri.path().split('/').last().unwrap_or("unknown");
+                        
+                        // Try to extract source code like hover does
+                        let mut doc_text = format!(
+                            "**Defined in:** `{}:{}:{}`\n\n",
+                            file_name,
+                            def.range.start.line + 1,
+                            def.range.start.character + 1
+                        );
+                        
+                        // Extract source code if files are available
+                        if let Some(files_map) = files {
+                            if let Some(rope) = files_map.get(&def.uri.to_string()) {
+                                let start_line = def.range.start.line as usize;
+                                let end_line = def.range.end.line as usize;
+                                
+                                // For single-line definitions (just the word name), expand to show full definition
+                                let (display_start, display_end) = if start_line == end_line {
+                                    let expanded_end = (end_line + 20).min(rope.len_lines().saturating_sub(1));
+                                    (start_line, expanded_end)
+                                } else {
+                                    (start_line, end_line)
+                                };
+                                
+                                // Extract source code lines
+                                let mut source_lines = Vec::new();
+                                for line_idx in display_start..=display_end.min(display_start + 20) {
+                                    if let Some(line) = rope.get_line(line_idx) {
+                                        let line_str = line.to_string();
+                                        source_lines.push(line_str.trim_end().to_string());
+                                        // Stop at semicolon for colon definitions
+                                        if line_str.trim_end().ends_with(';') {
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if !source_lines.is_empty() {
+                                    doc_text.push_str("```forth\n");
+                                    doc_text.push_str(&source_lines.join(""));
+                                    doc_text.push_str("\n```");
+                                }
+                            }
+                        }
+                        
+                        (
+                            Some(format!("user-defined in {}", file_name)),
+                            Some(lsp_types::Documentation::MarkupContent(
+                                lsp_types::MarkupContent {
+                                    kind: lsp_types::MarkupKind::Markdown,
+                                    value: doc_text,
+                                },
+                            )),
+                        )
+                    } else {
+                        (Some("user-defined".to_string()), None)
+                    };
+                    
                     ret.push(CompletionItem {
                         label,
-                        detail: Some("user-defined".to_string()),
-                        documentation: None,
+                        detail,
+                        documentation,
                         ..Default::default()
                     });
                 }
@@ -115,7 +179,7 @@ pub fn handle_completion(
             let result = if word.len_chars() > 0 {
                 log_debug!("Found word {}", word);
                 let use_lower = word.is_lowercase();
-                get_completions(&word.to_string(), use_lower, data, Some(def_index))
+                get_completions(&word.to_string(), use_lower, data, Some(def_index), Some(files))
             } else {
                 None
             };
@@ -137,7 +201,7 @@ mod tests {
     #[test]
     fn test_completion_finds_matching_words() {
         let words = Words::default();
-        let result = get_completions("DU", false, &words, None);
+        let result = get_completions("DU", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -154,7 +218,7 @@ mod tests {
     #[test]
     fn test_completion_respects_lowercase() {
         let words = Words::default();
-        let result = get_completions("du", true, &words, None);
+        let result = get_completions("du", true, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -172,7 +236,7 @@ mod tests {
     #[test]
     fn test_completion_respects_uppercase() {
         let words = Words::default();
-        let result = get_completions("DU", false, &words, None);
+        let result = get_completions("DU", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -190,7 +254,7 @@ mod tests {
     #[test]
     fn test_completion_includes_stack_effects() {
         let words = Words::default();
-        let result = get_completions("SWAP", false, &words, None);
+        let result = get_completions("SWAP", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -208,7 +272,7 @@ mod tests {
     #[test]
     fn test_completion_includes_documentation() {
         let words = Words::default();
-        let result = get_completions("+", false, &words, None);
+        let result = get_completions("+", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -228,7 +292,7 @@ mod tests {
     #[test]
     fn test_completion_empty_prefix() {
         let words = Words::default();
-        let result = get_completions("", false, &words, None);
+        let result = get_completions("", false, &words, None, None);
 
         assert!(result.is_none());
     }
@@ -236,7 +300,7 @@ mod tests {
     #[test]
     fn test_completion_no_matches() {
         let words = Words::default();
-        let result = get_completions("ZZZZNONEXISTENT", false, &words, None);
+        let result = get_completions("ZZZZNONEXISTENT", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -249,7 +313,7 @@ mod tests {
     #[test]
     fn test_completion_single_character() {
         let words = Words::default();
-        let result = get_completions("+", false, &words, None);
+        let result = get_completions("+", false, &words, None, None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -279,7 +343,7 @@ mod tests {
             &Rope::from_str(": myword 1 + ;\n: mytest 2 * ;"),
         );
 
-        let result = get_completions("my", false, &words, Some(&index));
+        let result = get_completions("my", false, &words, Some(&index), None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -305,7 +369,7 @@ mod tests {
         // Define a word that exists in built-ins
         index.update_file(&file_path, &Rope::from_str(": DUP 1 + ;"));
 
-        let result = get_completions("du", false, &words, Some(&index));
+        let result = get_completions("du", false, &words, Some(&index), None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {
@@ -337,7 +401,7 @@ mod tests {
 
         index.update_file(&file_path, &Rope::from_str(": myword 1 + ;"));
 
-        let result = get_completions("+", false, &words, Some(&index));
+        let result = get_completions("+", false, &words, Some(&index), None);
 
         assert!(result.is_some());
         if let Some(CompletionResponse::Array(items)) = result {

@@ -65,17 +65,15 @@ impl DefinitionIndex {
                     definition_token_indices.insert(data.start);
                 }
 
-                let Some((name, _selection_start, _selection_end)) =
+                let Some((name, selection_start, selection_end)) =
                     extract_word_name_with_range(result, 1)
                 else {
                     continue;
                 };
 
-                let tok = Token::Illegal(Data::new(0, 0, ""));
-                let begin = result.first().unwrap_or(&tok).get_data();
-                let end = result.last().unwrap_or(&tok).get_data();
-
-                let range = data_range_from_to(begin, end, rope);
+                // Use the name's range, not the entire definition block
+                let name_data = Data::new(selection_start, selection_end, "");
+                let range = data_range_from_to(&name_data, &name_data, rope);
 
                 // Store with lowercase key for case-insensitive lookup
                 self.definitions
@@ -115,8 +113,8 @@ impl DefinitionIndex {
 
                         let name = name_data.value.to_string();
 
-                        // Create range spanning from the defining word to the name
-                        let range = data_range_from_to(defining_word_data, name_data, rope);
+                        // Use only the name's range, not including the defining word
+                        let range = name_data.to_range(rope);
 
                         // Store with lowercase key for case-insensitive lookup
                         self.definitions
@@ -167,8 +165,15 @@ impl DefinitionIndex {
         let mut locations = Vec::new();
 
         if let Some(defs) = self.definitions.get(&word.to_lowercase()) {
-            for (file_path, range) in defs {
-                if let Ok(uri) = Url::from_file_path(file_path) {
+            for (file_path_or_uri, range) in defs {
+                // Try parsing as URI first (file:// scheme), then fall back to file path
+                let uri = if file_path_or_uri.starts_with("file://") {
+                    Url::parse(file_path_or_uri).ok()
+                } else {
+                    Url::from_file_path(file_path_or_uri).ok()
+                };
+
+                if let Some(uri) = uri {
                     locations.push(Location { uri, range: *range });
                 }
             }
@@ -182,8 +187,15 @@ impl DefinitionIndex {
         let mut locations = Vec::new();
 
         if let Some(refs) = self.references.get(&word.to_lowercase()) {
-            for (file_path, range) in refs {
-                if let Ok(uri) = Url::from_file_path(file_path) {
+            for (file_path_or_uri, range) in refs {
+                // Try parsing as URI first (file:// scheme), then fall back to file path
+                let uri = if file_path_or_uri.starts_with("file://") {
+                    Url::parse(file_path_or_uri).ok()
+                } else {
+                    Url::from_file_path(file_path_or_uri).ok()
+                };
+
+                if let Some(uri) = uri {
                     locations.push(Location { uri, range: *range });
                 }
             }
@@ -493,7 +505,8 @@ mod tests {
         let defs = index.find_definitions("DATE");
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].range.start.line, 0);
-        assert_eq!(defs[0].range.start.character, 0);
+        // Range should be for "DATE" (starts at character 9), not "VARIABLE"
+        assert_eq!(defs[0].range.start.character, 9);
     }
 
     #[test]

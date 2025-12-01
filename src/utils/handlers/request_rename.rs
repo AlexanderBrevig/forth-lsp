@@ -38,6 +38,8 @@ pub fn get_rename_edits(
 
     let word = rope.word_on_or_before(ix).to_string();
 
+    eprintln!("Rename: word at {}:{} is '{}'", line, character, word);
+
     if word.is_empty() {
         return None;
     }
@@ -82,7 +84,7 @@ pub fn handle_rename(
             log_request_msg!(id, "rename at {} to '{}'", pos.format(), params.new_name);
 
             let workspace_edit = get_rename_edits(
-                &pos.file_path,
+                &pos.file_uri,
                 pos.line,
                 pos.character,
                 &params.new_name,

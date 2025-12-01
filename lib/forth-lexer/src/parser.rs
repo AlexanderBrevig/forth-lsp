@@ -176,10 +176,11 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
 
+        let end = self.position.min(self.raw.len());
         Data {
             start,
-            end: self.position,
-            value: &self.raw[start..self.position],
+            end,
+            value: &self.raw[start..end],
         }
     }
 
@@ -188,10 +189,11 @@ impl<'a> Lexer<'a> {
         while !self.ch.is_whitespace() && self.ch != '\0' {
             self.read_char();
         }
+        let end = self.position.min(self.raw.len());
         Data {
             start,
-            end: self.position,
-            value: &self.raw[start..self.position],
+            end,
+            value: &self.raw[start..end],
         }
     }
 
@@ -207,10 +209,11 @@ impl<'a> Lexer<'a> {
         {
             self.read_char();
         }
+        let end = self.position.min(self.raw.len());
         Data {
             start,
-            end: self.position,
-            value: &self.raw[start..self.position],
+            end,
+            value: &self.raw[start..end],
         }
     }
 
