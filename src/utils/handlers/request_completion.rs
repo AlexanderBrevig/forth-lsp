@@ -45,7 +45,7 @@ pub fn get_completions(
                     let definitions = index.find_definitions(&word);
                     let (detail, documentation) = if !definitions.is_empty() {
                         let def = &definitions[0];
-                        let file_name = def.uri.path().split('/').last().unwrap_or("unknown");
+                        let file_name = def.uri.path().split('/').next_back().unwrap_or("unknown");
 
                         // Try to extract source code like hover does
                         let mut doc_text = format!(
