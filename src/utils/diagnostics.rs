@@ -5,7 +5,7 @@ use crate::words::Words;
 use forth_lexer::parser::Lexer;
 use forth_lexer::token::Token;
 use lsp_server::{Connection, Message};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, PublishDiagnosticsParams, Range, Url};
+use lsp_types::{Diagnostic, DiagnosticSeverity, Position, PublishDiagnosticsParams, Range, Uri};
 use ropey::Rope;
 use std::collections::HashSet;
 
@@ -41,11 +41,10 @@ pub fn check_undefined_words(
     // Collect all definition names from this file to avoid false positives
     let mut local_definitions = HashSet::new();
     for result in find_colon_definitions(&tokens) {
-        if result.len() >= 3 {
-            if let Token::Word(data) = &result[1] {
+        if result.len() >= 3
+            && let Token::Word(data) = &result[1] {
                 local_definitions.insert(data.value.to_lowercase());
             }
-        }
     }
 
     // Add local definitions to defined words
@@ -146,8 +145,8 @@ pub fn check_unmatched_delimiters(rope: &Rope) -> Vec<Diagnostic> {
     }
 
     // Report unclosed parentheses
-    if paren_depth > 0 {
-        if let Some(start) = paren_start {
+    if paren_depth > 0
+        && let Some(start) = paren_start {
             let start_pos = Position {
                 line: rope.char_to_line(start) as u32,
                 character: (start - rope.line_to_char(rope.char_to_line(start))) as u32,
@@ -170,7 +169,6 @@ pub fn check_unmatched_delimiters(rope: &Rope) -> Vec<Diagnostic> {
                 data: None,
             });
         }
-    }
 
     diagnostics
 }
@@ -195,7 +193,7 @@ pub fn get_diagnostics(
 /// Publish diagnostics to the LSP client
 pub fn publish_diagnostics(
     connection: &Connection,
-    uri: Url,
+    uri: Uri,
     diagnostics: Vec<Diagnostic>,
     version: i32,
 ) -> Result<()> {

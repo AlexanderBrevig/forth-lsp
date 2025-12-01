@@ -27,6 +27,7 @@ pub fn forth_lsp_capabilities() -> ServerCapabilities {
             retrigger_characters: None,
             work_done_progress_options: Default::default(),
         }),
+        document_formatting_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }

@@ -36,12 +36,18 @@ pub fn handle_did_change_text_document(
                     change.range,
                     change.text.len()
                 );
-                let range = change.range.unwrap_or_default();
-                let start =
-                    rope.line_to_char(range.start.line as usize) + range.start.character as usize;
-                let end = rope.line_to_char(range.end.line as usize) + range.end.character as usize;
-                rope.remove(start..end);
-                rope.insert(start, change.text.as_str());
+                if let Some(range) = change.range {
+                    // Incremental change - update specific range
+                    let start = rope.line_to_char(range.start.line as usize)
+                        + range.start.character as usize;
+                    let end =
+                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+                    rope.remove(start..end);
+                    rope.insert(start, change.text.as_str());
+                } else {
+                    // Full document sync - replace entire rope
+                    *rope = Rope::from_str(change.text.as_str());
+                }
             }
             log_debug!("After changes, rope has {} chars", rope.len_chars());
             // Update definition index for the changed file

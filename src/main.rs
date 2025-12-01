@@ -1,8 +1,11 @@
+mod config;
 mod error;
+mod formatter;
 mod prelude;
 mod utils;
 mod words;
 
+use crate::config::Config;
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::notification_did_change::handle_did_change_text_document;
@@ -11,6 +14,7 @@ use crate::utils::handlers::notification_did_save::handle_did_save_text_document
 use crate::utils::handlers::request_completion::handle_completion;
 use crate::utils::handlers::request_document_symbols::handle_document_symbols;
 use crate::utils::handlers::request_find_references::handle_find_references;
+use crate::utils::handlers::request_formatting::handle_formatting;
 use crate::utils::handlers::request_goto_definition::handle_goto_definition;
 use crate::utils::handlers::request_hover::handle_hover;
 use crate::utils::handlers::request_prepare_rename::handle_prepare_rename;
@@ -53,10 +57,19 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     eprintln!("Starting main loop");
     let init: InitializeParams = serde_json::from_value(params)?;
     let mut files = HashMap::<String, Rope>::new();
+
+    // Load configuration from workspace root
+    let workspace_root = init
+        .workspace_folders
+        .as_ref()
+        .and_then(|folders| folders.first())
+        .map(|folder| folder.uri.path().as_str());
+    let config = Config::load_from_workspace(workspace_root);
+
     if let Some(roots) = init.workspace_folders {
         eprintln!("Root: {:?}", roots);
         for root in roots {
-            load_dir(root.uri.path(), &mut files)?;
+            load_dir(root.uri.path().as_str(), &mut files)?;
         }
     }
 
@@ -102,6 +115,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     continue;
                 }
                 if handle_workspace_symbols(&request, &connection, &def_index).is_ok() {
+                    continue;
+                }
+                if handle_formatting(&request, &connection, &files, &config).is_ok() {
                     continue;
                 }
             }

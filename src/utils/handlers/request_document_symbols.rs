@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_document_symbols_multiple_definitions() {
-        let rope = Rope::from_str(": add1 1 + ;\n: double 2 * ;\n: square dup * ;");
+        let rope = Rope::from_str(": add1 1 + ;\n\n: double 2 * ;\n\n: square dup * ;\n\n");
         let symbols = get_document_symbols(&rope);
 
         assert_eq!(symbols.len(), 3);

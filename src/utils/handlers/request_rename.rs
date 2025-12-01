@@ -1,3 +1,5 @@
+// Uri has interior mutability but is safe to use as HashMap key (false positive)
+#![allow(clippy::mutable_key_type)]
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;

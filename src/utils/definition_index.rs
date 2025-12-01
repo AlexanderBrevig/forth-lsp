@@ -4,7 +4,7 @@ use forth_lexer::{
     parser::Lexer,
     token::{Data, Token},
 };
-use lsp_types::{Location, Range, Url};
+use lsp_types::{Location, Range};
 use ropey::Rope;
 
 use super::{
@@ -168,9 +168,9 @@ impl DefinitionIndex {
             for (file_path_or_uri, range) in defs {
                 // Try parsing as URI first (file:// scheme), then fall back to file path
                 let uri = if file_path_or_uri.starts_with("file://") {
-                    Url::parse(file_path_or_uri).ok()
+                    file_path_or_uri.parse().ok()
                 } else {
-                    Url::from_file_path(file_path_or_uri).ok()
+                    format!("file://{}", file_path_or_uri).parse().ok()
                 };
 
                 if let Some(uri) = uri {
@@ -190,9 +190,9 @@ impl DefinitionIndex {
             for (file_path_or_uri, range) in refs {
                 // Try parsing as URI first (file:// scheme), then fall back to file path
                 let uri = if file_path_or_uri.starts_with("file://") {
-                    Url::parse(file_path_or_uri).ok()
+                    file_path_or_uri.parse().ok()
                 } else {
-                    Url::from_file_path(file_path_or_uri).ok()
+                    format!("file://{}", file_path_or_uri).parse().ok()
                 };
 
                 if let Some(uri) = uri {

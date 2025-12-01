@@ -8,6 +8,7 @@ pub mod notification_did_save;
 pub mod request_completion;
 pub mod request_document_symbols;
 pub mod request_find_references;
+pub mod request_formatting;
 pub mod request_goto_definition;
 pub mod request_hover;
 pub mod request_prepare_rename;

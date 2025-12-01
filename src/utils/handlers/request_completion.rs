@@ -45,7 +45,7 @@ pub fn get_completions(
                     let definitions = index.find_definitions(&word);
                     let (detail, documentation) = if !definitions.is_empty() {
                         let def = &definitions[0];
-                        let file_name = def.uri.path().split('/').next_back().unwrap_or("unknown");
+                        let file_name = def.uri.path().as_str().split('/').next_back().unwrap_or("unknown");
 
                         // Try to extract source code like hover does
                         let mut doc_text = format!(
@@ -56,8 +56,8 @@ pub fn get_completions(
                         );
 
                         // Extract source code if files are available
-                        if let Some(files_map) = files {
-                            if let Some(rope) = files_map.get(&def.uri.to_string()) {
+                        if let Some(files_map) = files
+                            && let Some(rope) = files_map.get(&def.uri.to_string()) {
                                 let start_line = def.range.start.line as usize;
                                 let end_line = def.range.end.line as usize;
 
@@ -90,7 +90,6 @@ pub fn get_completions(
                                     doc_text.push_str("\n```");
                                 }
                             }
-                        }
 
                         (
                             Some(format!("user-defined in {}", file_name)),
@@ -172,11 +171,10 @@ pub fn handle_completion(
             if ix >= rope.len_chars() {
                 return Err(Error::OutOfBounds(ix));
             }
-            if let Some(char_at_ix) = rope.get_char(ix) {
-                if char_at_ix.is_whitespace() && ix > 0 {
+            if let Some(char_at_ix) = rope.get_char(ix)
+                && char_at_ix.is_whitespace() && ix > 0 {
                     ix -= 1;
                 }
-            }
             let word = rope.word_at(ix);
             let result = if word.len_chars() > 0 {
                 log_debug!("Found word {}", word);

@@ -1,0 +1,6 @@
+[format]
+space_before_semicolon = true
+indent_control_structures = true
+stack_comment_on_declaration_line = true
+preserve_definition_newlines = true
+blank_line_between_definitions = true

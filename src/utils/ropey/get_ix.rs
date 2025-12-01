@@ -29,7 +29,7 @@ impl GetIx<GotoTypeDefinitionParams> for Rope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams, Url};
+    use lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams};
     use ropey::Rope;
 
     #[test]
@@ -38,7 +38,7 @@ mod tests {
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///test.forth").unwrap(),
+                    uri: "file:///test.forth".parse().unwrap(),
                 },
                 position: Position {
                     line: 0,
@@ -58,7 +58,7 @@ mod tests {
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///test.forth").unwrap(),
+                    uri: "file:///test.forth".parse().unwrap(),
                 },
                 position: Position {
                     line: 1,
@@ -80,7 +80,7 @@ mod tests {
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///test.forth").unwrap(),
+                    uri: "file:///test.forth".parse().unwrap(),
                 },
                 position: Position {
                     line: 0,
@@ -98,7 +98,7 @@ mod tests {
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
-                    uri: Url::parse("file:///test.forth").unwrap(),
+                    uri: "file:///test.forth".parse().unwrap(),
                 },
                 position: Position {
                     line: 2,

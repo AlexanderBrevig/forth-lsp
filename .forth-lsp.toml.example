@@ -1,0 +1,53 @@
+# Example configuration file for forth-lsp
+# Copy this file to .forth-lsp.toml in your workspace root to customize settings
+
+[format]
+# Number of spaces for indentation (default: 2)
+indent_width = 2
+
+# Use spaces instead of tabs (default: true)
+use_spaces = true
+
+# Add space after colon in definitions (`: word` vs `:word`) (default: true)
+space_after_colon = true
+
+# Add space before semicolon in definitions (`word ;` vs `word;`) (default: false)
+space_before_semicolon = false
+
+# Spaces between words, 1 or more (default: 1)
+word_spacing = 1
+
+# Indent control structures (IF/THEN, DO/LOOP, etc.) (default: true)
+# When true, definitions will be multi-line with indented bodies
+# When false, definitions stay on a single line
+indent_control_structures = true
+
+# Keep stack comments (stack effects) on same line as colon declaration (default: true)
+# When true: `: word ( a b -- c )`
+# When false: `: word` followed by `  ( a b -- c )` on next line
+# Note: Only applies when indent_control_structures is true
+# Regular comments (\ ...) are not affected by this setting
+stack_comment_on_declaration_line = true
+
+# Preserve newlines within colon definitions from original source (default: false)
+# When true, keeps manual line breaks inside `: ... ;` blocks
+# When false, formats according to indent_control_structures setting
+preserve_definition_newlines = false
+
+# Add blank line before each colon definition (default: true)
+# Helps visually separate definitions
+blank_line_between_definitions = true
+
+[builtin]
+# Additional builtin words specific to your Forth implementation
+# These words will be recognized as valid by the LSP and shown in hover/completion
+
+# Simple format (word name only)
+[[builtin.words]]
+word = "SIMPLEWORD"
+
+# Full format with metadata
+[[builtin.words]]
+word = "LOADFROM"
+stack = "( addr -- )"
+description = "Loads data from specified address"

@@ -21,7 +21,7 @@ use super::cast;
 // Test-only imports
 #[cfg(test)]
 use crate::utils::{
-    data_to_position::{data_range_from_to, ToPosition},
+    data_to_position::data_range_from_to,
     definition_helpers::find_colon_definitions,
     token_utils::extract_word_name,
     uri_helpers::path_to_uri,
@@ -32,7 +32,7 @@ use forth_lexer::{
     token::{Data, Token},
 };
 #[cfg(test)]
-use lsp_types::{Location, Url};
+use lsp_types::Location;
 
 // Extract goto definition logic for testing
 #[cfg(test)]
@@ -47,7 +47,7 @@ pub fn find_word_definitions(word: &str, files: &HashMap<String, Rope>) -> Vec<L
         for result in find_colon_definitions(&tokens) {
             // Check if this definition matches the word we're looking for
             if result.len() >= 2 {
-                let Some(name) = extract_word_name(&result, 1) else {
+                let Some(name) = extract_word_name(result, 1) else {
                     continue;
                 };
 

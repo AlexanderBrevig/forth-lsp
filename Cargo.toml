@@ -4,8 +4,8 @@ resolver = "2"
 
 [package]
 name = "forth-lsp"
-version = "0.3.1"
-edition = "2021"
+version = "0.4.0"
+edition = "2024"
 license = "MIT"
 description = "LSP for the Forth programming language"
 repository = "https://github.com/alexanderbrevig/forth-lsp"
@@ -17,16 +17,19 @@ name = "forth-lsp"
 path = "src/main.rs"
 
 [dependencies]
-lsp-server = "0.7.0"
-serde = "1.0.163"
-serde_json = "1.0.96"
-lsp-types = "0.94.0"
-toml = "0.7.4"
-ropey = "1.6.0"
-anyhow = "1.0.71"
-thiserror = "1.0.40"
+lsp-server = "0.7.9"
+serde = "1.0.228"
+serde_json = "1.0.145"
+lsp-types = "0.97.0"
+toml = "0.9.8"
+ropey = "1.6.1"
+anyhow = "1.0.100"
+thiserror = "2.0.17"
 
 [dependencies.forth-lexer]
-version = "0.2.0"
+version = "0.2.1"
 path = "lib/forth-lexer"
 features = ["ropey"]
+
+[dev-dependencies]
+tempfile = "3.23.0"

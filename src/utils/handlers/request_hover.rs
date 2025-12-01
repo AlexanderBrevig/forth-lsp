@@ -41,7 +41,7 @@ pub fn get_hover_result(
                     }
 
                     // Add location info
-                    let file_name = def.uri.path().split('/').next_back().unwrap_or("unknown");
+                    let file_name = def.uri.path().as_str().split('/').next_back().unwrap_or("unknown");
                     hover_text.push_str(&format!(
                         "**Defined in:** `{}:{}:{}`\n\n",
                         file_name,

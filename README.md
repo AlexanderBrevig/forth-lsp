@@ -15,6 +15,7 @@ A [Language Server Protocol](https://microsoft.github.io/language-server-protoco
 - **Workspace Symbols** - Search for definitions across all files
 - **Signature Help** - View parameter information while typing
 - **Diagnostics** - Real-time error detection for undefined words
+- **Formatting** - Auto-format your code with configurable options
 
 ## Installation
 
