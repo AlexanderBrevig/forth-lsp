@@ -72,7 +72,7 @@ pub fn handle_signature_help(
 
             eprintln!("#{id}: signature help at {}", pos.format());
 
-            let rope = files.get(&pos.file_path).ok_or_else(|| {
+            let rope = files.get(&pos.file_uri).ok_or_else(|| {
                 Error::NoSuchFile(
                     params
                         .text_document_position_params

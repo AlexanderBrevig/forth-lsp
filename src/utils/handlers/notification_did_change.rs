@@ -22,10 +22,20 @@ pub fn handle_did_change_text_document(
     {
         Ok(params) => {
             let file_uri = params.text_document.uri.to_string();
+            log_debug!("DidChange for file: {}", file_uri);
             let rope = files
                 .get_mut(&file_uri)
                 .expect("Must be able to get rope for lang");
+            log_debug!(
+                "Processing {} content changes",
+                params.content_changes.len()
+            );
             for change in params.content_changes {
+                log_debug!(
+                    "Change range: {:?}, text length: {}",
+                    change.range,
+                    change.text.len()
+                );
                 let range = change.range.unwrap_or_default();
                 let start =
                     rope.line_to_char(range.start.line as usize) + range.start.character as usize;
@@ -33,7 +43,9 @@ pub fn handle_did_change_text_document(
                 rope.remove(start..end);
                 rope.insert(start, change.text.as_str());
             }
+            log_debug!("After changes, rope has {} chars", rope.len_chars());
             // Update definition index for the changed file
+            log_debug!("Updating definition index for: {}", file_uri);
             def_index.update_file(&file_uri, rope);
 
             // Publish diagnostics for the changed file

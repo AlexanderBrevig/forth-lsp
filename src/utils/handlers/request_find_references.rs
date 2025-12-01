@@ -62,7 +62,7 @@ pub fn handle_find_references(
             eprintln!("#{id}: find references at {}", pos.format());
 
             let references = get_references(
-                &pos.file_path,
+                &pos.file_uri,
                 pos.line,
                 pos.character,
                 params.context.include_declaration,

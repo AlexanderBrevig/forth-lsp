@@ -51,26 +51,38 @@ pub fn get_hover_result(
 
                     // Try to extract source code if files are available
                     if let Some(files_map) = files {
-                        if let Ok(file_path) = def.uri.to_file_path() {
-                            if let Some(rope) =
-                                files_map.get(&file_path.to_string_lossy().to_string())
-                            {
-                                let start_line = def.range.start.line as usize;
-                                let end_line = def.range.end.line as usize;
+                        // Use URI string directly (files HashMap keys are URIs, not paths)
+                        if let Some(rope) = files_map.get(&def.uri.to_string()) {
+                            let start_line = def.range.start.line as usize;
+                            let end_line = def.range.end.line as usize;
 
-                                // Extract the source code lines
-                                let mut source_lines = Vec::new();
-                                for line_idx in start_line..=end_line.min(start_line + 20) {
-                                    if let Some(line) = rope.get_line(line_idx) {
-                                        source_lines.push(line.to_string().trim_end().to_string());
+                            // For single-line definitions (just the word name), try to expand to show the full definition
+                            let (display_start, display_end) = if start_line == end_line {
+                                // Expand to show context (up to 20 lines after the name)
+                                let expanded_end =
+                                    (end_line + 20).min(rope.len_lines().saturating_sub(1));
+                                (start_line, expanded_end)
+                            } else {
+                                (start_line, end_line)
+                            };
+
+                            // Extract the source code lines
+                            let mut source_lines = Vec::new();
+                            for line_idx in display_start..=display_end.min(display_start + 20) {
+                                if let Some(line) = rope.get_line(line_idx) {
+                                    let line_str = line.to_string();
+                                    source_lines.push(line_str.trim_end().to_string());
+                                    // Stop at semicolon for colon definitions
+                                    if line_str.trim_end().ends_with(';') {
+                                        break;
                                     }
                                 }
+                            }
 
-                                if !source_lines.is_empty() {
-                                    hover_text.push_str("```forth\n");
-                                    hover_text.push_str(&source_lines.join(""));
-                                    hover_text.push_str("\n```\n");
-                                }
+                            if !source_lines.is_empty() {
+                                hover_text.push_str("```forth\n");
+                                hover_text.push_str(&source_lines.join(""));
+                                hover_text.push_str("\n```\n");
                             }
                         }
                     }
@@ -228,13 +240,14 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+        let file_uri = format!("file://{}", file_path);
 
         // Define a word that exists in built-ins
         let rope = Rope::from_str(": DUP 1 + ;");
-        index.update_file(&file_path, &rope);
+        index.update_file(&file_uri, &rope);
 
         let mut files = HashMap::new();
-        files.insert(file_path.clone(), rope);
+        files.insert(file_uri.clone(), rope);
 
         let result = get_hover_result("DUP", &words, Some(&index), Some(&files));
 
@@ -261,13 +274,14 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+        let file_uri = format!("file://{}", file_path);
 
         // Define a word that doesn't exist in built-ins
         let rope = Rope::from_str(": myword 1 + ;");
-        index.update_file(&file_path, &rope);
+        index.update_file(&file_uri, &rope);
 
         let mut files = HashMap::new();
-        files.insert(file_path.clone(), rope);
+        files.insert(file_uri.clone(), rope);
 
         let result = get_hover_result("myword", &words, Some(&index), Some(&files));
 
@@ -292,13 +306,14 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+        let file_uri = format!("file://{}", file_path);
 
         // Define a variable
         let rope = Rope::from_str("VARIABLE counter");
-        index.update_file(&file_path, &rope);
+        index.update_file(&file_uri, &rope);
 
         let mut files = HashMap::new();
-        files.insert(file_path.clone(), rope);
+        files.insert(file_uri.clone(), rope);
 
         let result = get_hover_result("counter", &words, Some(&index), Some(&files));
 
@@ -323,15 +338,16 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
+        let file_uri = format!("file://{}", file_path);
 
         // Define a multiline word
         let rope = Rope::from_str(
             ": factorial\n  dup 0= if\n    drop 1\n  else\n    dup 1- factorial *\n  then\n;",
         );
-        index.update_file(&file_path, &rope);
+        index.update_file(&file_uri, &rope);
 
         let mut files = HashMap::new();
-        files.insert(file_path.clone(), rope);
+        files.insert(file_uri.clone(), rope);
 
         let result = get_hover_result("factorial", &words, Some(&index), Some(&files));
 

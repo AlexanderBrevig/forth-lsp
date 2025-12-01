@@ -7,11 +7,13 @@ use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::notification_did_change::handle_did_change_text_document;
 use crate::utils::handlers::notification_did_open::handle_did_open_text_document;
+use crate::utils::handlers::notification_did_save::handle_did_save_text_document;
 use crate::utils::handlers::request_completion::handle_completion;
 use crate::utils::handlers::request_document_symbols::handle_document_symbols;
 use crate::utils::handlers::request_find_references::handle_find_references;
 use crate::utils::handlers::request_goto_definition::handle_goto_definition;
 use crate::utils::handlers::request_hover::handle_hover;
+use crate::utils::handlers::request_prepare_rename::handle_prepare_rename;
 use crate::utils::handlers::request_rename::handle_rename;
 use crate::utils::handlers::request_signature_help::handle_signature_help;
 use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
@@ -87,6 +89,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                 if handle_find_references(&request, &connection, &mut files, &def_index).is_ok() {
                     continue;
                 }
+                if handle_prepare_rename(&request, &connection, &files, &def_index).is_ok() {
+                    continue;
+                }
                 if handle_rename(&request, &connection, &mut files, &def_index).is_ok() {
                     continue;
                 }
@@ -127,6 +132,17 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                 {
                     continue;
                 }
+                if handle_did_save_text_document(
+                    &notification,
+                    &connection,
+                    &mut files,
+                    &mut def_index,
+                    &data,
+                )
+                .is_ok()
+                {
+                    continue;
+                }
             }
         }
     }
@@ -147,7 +163,9 @@ fn load_dir(
                     let raw_content = fs::read(entry)?;
                     let content = String::from_utf8_lossy(&raw_content);
                     let rope = Rope::from_str(&content);
-                    files.insert(entry.to_string(), rope);
+                    // Convert path to URI to match DidOpen/DidChange format
+                    let file_uri = format!("file://{}", entry);
+                    files.insert(file_uri, rope);
                 }
             }
         }

@@ -11,38 +11,37 @@ use ropey::Rope;
 
 use super::cast_notification;
 
-pub fn handle_did_open_text_document(
+pub fn handle_did_save_text_document(
     notification: &Notification,
     connection: &Connection,
     files: &mut HashMap<String, Rope>,
     def_index: &mut DefinitionIndex,
     builtin_words: &Words,
 ) -> Result<()> {
-    match cast_notification::<lsp_types::notification::DidOpenTextDocument>(notification.clone()) {
+    match cast_notification::<lsp_types::notification::DidSaveTextDocument>(notification.clone()) {
         Ok(params) => {
             let file_uri = params.text_document.uri.to_string();
-            log_debug!("DidOpen for file: {}", file_uri);
-            if let std::collections::hash_map::Entry::Vacant(e) = files.entry(file_uri.clone()) {
-                let rope = Rope::from_str(params.text_document.text.as_str());
-                // Update index for newly opened file
-                def_index.update_file(&file_uri, &rope);
 
-                // Publish diagnostics for the opened file
-                let diagnostics = get_diagnostics(&rope, def_index, builtin_words);
+            // Get the rope for this file
+            if let Some(rope) = files.get(&file_uri) {
+                // Update definition index for the saved file
+                log_debug!("Updating definition index on save for: {}", file_uri);
+                def_index.update_file(&file_uri, rope);
+
+                // Publish diagnostics for the saved file
+                let diagnostics = get_diagnostics(rope, def_index, builtin_words);
                 publish_diagnostics(
                     connection,
                     params.text_document.uri.clone(),
                     diagnostics,
-                    params.text_document.version,
+                    0, // No version for save notifications
                 )?;
-
-                e.insert(rope);
             }
+
             Ok(())
         }
-        Err(Error::ExtractNotificationError(req)) => Err(Error::ExtractNotificationError(req)),
         Err(err) => {
-            log_handler_error!("Did open notification", err);
+            log_handler_error!("Did save notification", err);
             Err(err)
         }
     }

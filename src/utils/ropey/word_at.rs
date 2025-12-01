@@ -103,4 +103,14 @@ mod tests {
         let word = rope.word_at(3);
         assert_eq!("test", word);
     }
+
+    #[test]
+    fn word_at_hyphenated() {
+        let rope = Rope::from_str(": my-test 1 + ;");
+        // Test at various positions in "my-test"
+        assert_eq!("my-test", rope.word_at(2).to_string()); // at 'm'
+        assert_eq!("my-test", rope.word_at(4).to_string()); // at '-'
+        assert_eq!("my-test", rope.word_at(6).to_string()); // at 'e'
+        assert_eq!("my-test", rope.word_at(8).to_string()); // at 't'
+    }
 }

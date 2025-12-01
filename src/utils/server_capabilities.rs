@@ -18,7 +18,10 @@ pub fn forth_lsp_capabilities() -> ServerCapabilities {
         completion_provider: Some(lsp_types::CompletionOptions::default()),
         document_symbol_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
-        rename_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(lsp_types::RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
         signature_help_provider: Some(lsp_types::SignatureHelpOptions {
             trigger_characters: Some(vec![" ".to_string()]),
             retrigger_characters: None,
