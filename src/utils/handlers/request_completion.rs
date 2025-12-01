@@ -40,13 +40,13 @@ pub fn get_completions(
                     } else {
                         word.clone()
                     };
-                    
+
                     // Get definitions to extract documentation
                     let definitions = index.find_definitions(&word);
                     let (detail, documentation) = if !definitions.is_empty() {
                         let def = &definitions[0];
                         let file_name = def.uri.path().split('/').last().unwrap_or("unknown");
-                        
+
                         // Try to extract source code like hover does
                         let mut doc_text = format!(
                             "**Defined in:** `{}:{}:{}`\n\n",
@@ -54,24 +54,26 @@ pub fn get_completions(
                             def.range.start.line + 1,
                             def.range.start.character + 1
                         );
-                        
+
                         // Extract source code if files are available
                         if let Some(files_map) = files {
                             if let Some(rope) = files_map.get(&def.uri.to_string()) {
                                 let start_line = def.range.start.line as usize;
                                 let end_line = def.range.end.line as usize;
-                                
+
                                 // For single-line definitions (just the word name), expand to show full definition
                                 let (display_start, display_end) = if start_line == end_line {
-                                    let expanded_end = (end_line + 20).min(rope.len_lines().saturating_sub(1));
+                                    let expanded_end =
+                                        (end_line + 20).min(rope.len_lines().saturating_sub(1));
                                     (start_line, expanded_end)
                                 } else {
                                     (start_line, end_line)
                                 };
-                                
+
                                 // Extract source code lines
                                 let mut source_lines = Vec::new();
-                                for line_idx in display_start..=display_end.min(display_start + 20) {
+                                for line_idx in display_start..=display_end.min(display_start + 20)
+                                {
                                     if let Some(line) = rope.get_line(line_idx) {
                                         let line_str = line.to_string();
                                         source_lines.push(line_str.trim_end().to_string());
@@ -81,7 +83,7 @@ pub fn get_completions(
                                         }
                                     }
                                 }
-                                
+
                                 if !source_lines.is_empty() {
                                     doc_text.push_str("```forth\n");
                                     doc_text.push_str(&source_lines.join(""));
@@ -89,7 +91,7 @@ pub fn get_completions(
                                 }
                             }
                         }
-                        
+
                         (
                             Some(format!("user-defined in {}", file_name)),
                             Some(lsp_types::Documentation::MarkupContent(
@@ -102,7 +104,7 @@ pub fn get_completions(
                     } else {
                         (Some("user-defined".to_string()), None)
                     };
-                    
+
                     ret.push(CompletionItem {
                         label,
                         detail,
@@ -179,7 +181,13 @@ pub fn handle_completion(
             let result = if word.len_chars() > 0 {
                 log_debug!("Found word {}", word);
                 let use_lower = word.is_lowercase();
-                get_completions(&word.to_string(), use_lower, data, Some(def_index), Some(files))
+                get_completions(
+                    &word.to_string(),
+                    use_lower,
+                    data,
+                    Some(def_index),
+                    Some(files),
+                )
             } else {
                 None
             };
