@@ -11,7 +11,7 @@ categories = ["parser-implementations"]
 [dependencies]
 ropey = { version = "1.6.1", optional = true }
 nom = "8.0.0"
-anyhow = "1.0.100"
+anyhow = "1.0.101"
 
 [features]
 ropey = ["dep:ropey"] # This is really only used for an integration test
