@@ -1,5 +1,8 @@
 use crate::utils::handlers::request_semantic_tokens::semantic_tokens_capabilities;
-use lsp_types::{OneOf, ServerCapabilities, TextDocumentSyncKind};
+use lsp_types::{
+    CodeActionKind, CodeActionOptions, CodeActionProviderCapability, OneOf, ServerCapabilities,
+    TextDocumentSyncKind,
+};
 
 pub fn forth_lsp_capabilities() -> ServerCapabilities {
     ServerCapabilities {
@@ -30,6 +33,14 @@ pub fn forth_lsp_capabilities() -> ServerCapabilities {
             work_done_progress_options: Default::default(),
         }),
         document_formatting_provider: Some(OneOf::Left(true)),
+        code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
+            code_action_kinds: Some(vec![
+                CodeActionKind::QUICKFIX,
+                CodeActionKind::REFACTOR_EXTRACT,
+            ]),
+            work_done_progress_options: Default::default(),
+            resolve_provider: None,
+        })),
         ..Default::default()
     }
 }

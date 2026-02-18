@@ -5,6 +5,7 @@ pub mod common;
 pub mod notification_did_change;
 pub mod notification_did_open;
 pub mod notification_did_save;
+pub mod request_code_action;
 pub mod request_completion;
 pub mod request_document_symbols;
 pub mod request_find_references;

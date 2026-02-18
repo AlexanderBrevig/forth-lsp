@@ -11,6 +11,7 @@ use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::notification_did_change::handle_did_change_text_document;
 use crate::utils::handlers::notification_did_open::handle_did_open_text_document;
 use crate::utils::handlers::notification_did_save::handle_did_save_text_document;
+use crate::utils::handlers::request_code_action::handle_code_action;
 use crate::utils::handlers::request_completion::handle_completion;
 use crate::utils::handlers::request_document_symbols::handle_document_symbols;
 use crate::utils::handlers::request_find_references::handle_find_references;
@@ -124,6 +125,10 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     continue;
                 }
                 if handle_semantic_tokens_full(&request, &connection, &mut files, &data).is_ok() {
+                    continue;
+                }
+                if handle_code_action(&request, &connection, &mut files, &data, &def_index).is_ok()
+                {
                     continue;
                 }
             }

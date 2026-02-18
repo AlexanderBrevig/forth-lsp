@@ -4,7 +4,9 @@ use crate::utils::definition_index::DefinitionIndex;
 use crate::words::Words;
 use forth_lexer::token::Token;
 use lsp_server::{Connection, Message};
-use lsp_types::{Diagnostic, DiagnosticSeverity, Position, PublishDiagnosticsParams, Range, Uri};
+use lsp_types::{
+    Diagnostic, DiagnosticSeverity, NumberOrString, Position, PublishDiagnosticsParams, Range, Uri,
+};
 use ropey::Rope;
 use std::collections::HashSet;
 
@@ -120,13 +122,79 @@ pub fn check_undefined_words_from_tokens(
                     end: end_pos,
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
-                code: None,
+                code: Some(NumberOrString::String("undefined-word".to_string())),
                 code_description: None,
                 source: Some("forth-lsp".to_string()),
                 message: format!("Undefined word: {}", data.value),
                 related_information: None,
                 tags: None,
                 data: None,
+            });
+        }
+    }
+
+    diagnostics
+}
+
+/// Check for unclosed colon definitions using pre-parsed tokens
+pub fn check_unclosed_definitions_from_tokens(tokens: &[Token], rope: &Rope) -> Vec<Diagnostic> {
+    use crate::utils::data_to_position::ToPosition;
+    use std::collections::HashSet;
+
+    let mut diagnostics = Vec::new();
+
+    // Get all matched colon definition start positions
+    let matched_starts: HashSet<usize> = find_colon_definitions(tokens)
+        .iter()
+        .filter_map(|def| {
+            if let Token::Colon(data) = &def[0] {
+                Some(data.start)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Find all Colon tokens that are NOT in matched definitions
+    for (i, token) in tokens.iter().enumerate() {
+        if let Token::Colon(colon_data) = token {
+            if matched_starts.contains(&colon_data.start) {
+                continue;
+            }
+
+            // This is an unmatched colon - find insertion point
+            // Scan forward to next Colon or end of tokens, take the last token before it
+            let mut last_token_before_next = None;
+            for next_token in &tokens[i + 1..] {
+                if matches!(next_token, Token::Colon(_)) {
+                    break;
+                }
+                if !matches!(next_token, Token::Eof(_)) {
+                    last_token_before_next = Some(next_token);
+                }
+            }
+
+            // If we found no tokens after the colon, use the colon itself
+            let insert_data = last_token_before_next
+                .map(|t| t.get_data())
+                .unwrap_or(colon_data);
+            let insert_pos = insert_data.to_position_end(rope);
+
+            let colon_range = colon_data.to_range(rope);
+
+            diagnostics.push(Diagnostic {
+                range: colon_range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("unclosed-definition".to_string())),
+                code_description: None,
+                source: Some("forth-lsp".to_string()),
+                message: "Unclosed definition".to_string(),
+                related_information: None,
+                tags: None,
+                data: Some(serde_json::json!({
+                    "insert_line": insert_pos.line,
+                    "insert_character": insert_pos.character,
+                })),
             });
         }
     }
@@ -226,6 +294,7 @@ pub fn get_diagnostics_from_tokens(
         def_index,
         builtin_words,
     ));
+    diagnostics.extend(check_unclosed_definitions_from_tokens(tokens, rope));
     diagnostics.extend(check_unmatched_delimiters_from_source(source, rope));
     diagnostics
 }
@@ -513,6 +582,50 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|d| d.message.contains("Unmatched closing parenthesis"))
+        );
+    }
+
+    #[test]
+    fn test_unclosed_definition_diagnostic() {
+        let rope = Rope::from_str(": foo 1 +");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message == "Unclosed definition"
+                    && d.severity == Some(DiagnosticSeverity::WARNING)),
+            "Expected unclosed definition diagnostic, got: {:?}",
+            diagnostics
+        );
+
+        // Check that data contains insertion position
+        let unclosed = diagnostics
+            .iter()
+            .find(|d| d.message == "Unclosed definition")
+            .unwrap();
+        assert!(unclosed.data.is_some());
+        let data = unclosed.data.as_ref().unwrap();
+        assert!(data.get("insert_line").is_some());
+        assert!(data.get("insert_character").is_some());
+    }
+
+    #[test]
+    fn test_closed_definition_no_unclosed_diagnostic() {
+        let rope = Rope::from_str(": foo 1 + ;");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message == "Unclosed definition"),
+            "Closed definition should not trigger unclosed diagnostic"
         );
     }
 
