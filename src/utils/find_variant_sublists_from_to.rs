@@ -8,7 +8,7 @@ pub trait FindVariantSublistsFromTo<T> {
     ) -> Vec<&[T]>;
 }
 
-impl<T> FindVariantSublistsFromTo<T> for Vec<T> {
+impl<T> FindVariantSublistsFromTo<T> for [T] {
     fn find_variant_sublists_from_to(
         &self,
         from: Discriminant<T>,
@@ -26,6 +26,16 @@ impl<T> FindVariantSublistsFromTo<T> for Vec<T> {
             }
         }
         ret
+    }
+}
+
+impl<T> FindVariantSublistsFromTo<T> for Vec<T> {
+    fn find_variant_sublists_from_to(
+        &self,
+        from: Discriminant<T>,
+        to: Discriminant<T>,
+    ) -> Vec<&[T]> {
+        self.as_slice().find_variant_sublists_from_to(from, to)
     }
 }
 

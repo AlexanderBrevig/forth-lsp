@@ -2,28 +2,20 @@ use crate::prelude::*;
 use crate::utils::definition_helpers::find_colon_definitions;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::words::Words;
-use forth_lexer::parser::Lexer;
 use forth_lexer::token::Token;
 use lsp_server::{Connection, Message};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, PublishDiagnosticsParams, Range, Uri};
 use ropey::Rope;
 use std::collections::HashSet;
 
-/// Check for undefined words in a Forth file
-pub fn check_undefined_words(
+/// Check for undefined words using pre-parsed tokens
+pub fn check_undefined_words_from_tokens(
+    tokens: &[Token],
     rope: &Rope,
     def_index: &DefinitionIndex,
     builtin_words: &Words,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let progn = rope.to_string();
-    let mut lexer = Lexer::new(&progn);
-
-    // Try to parse, but return empty if lexer fails on malformed input
-    let tokens = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lexer.parse())) {
-        Ok(tokens) => tokens,
-        Err(_) => return diagnostics, // Return empty diagnostics if lexer panics
-    };
 
     // Build set of all defined words (built-in + user-defined)
     let mut defined_words = HashSet::new();
@@ -40,7 +32,7 @@ pub fn check_undefined_words(
 
     // Collect all definition names from this file to avoid false positives
     let mut local_definitions = HashSet::new();
-    for result in find_colon_definitions(&tokens) {
+    for result in find_colon_definitions(tokens) {
         if result.len() >= 3
             && let Token::Word(data) = &result[1]
         {
@@ -63,15 +55,13 @@ pub fn check_undefined_words(
         "buffer:",
     ];
     for i in 0..tokens.len().saturating_sub(1) {
-        if let Token::Word(data) = &tokens[i] {
-            if defining_words
+        if let Token::Word(data) = &tokens[i]
+            && defining_words
                 .iter()
                 .any(|&dw| dw.eq_ignore_ascii_case(data.value))
-            {
-                if let Some(Token::Word(name_data)) = tokens.get(i + 1) {
-                    local_definitions.insert(name_data.value.to_lowercase());
-                }
-            }
+            && let Some(Token::Word(name_data)) = tokens.get(i + 1)
+        {
+            local_definitions.insert(name_data.value.to_lowercase());
         }
     }
 
@@ -82,7 +72,7 @@ pub fn check_undefined_words(
 
     // Check all word usages
     let mut in_string_literal = false;
-    for token in &tokens {
+    for token in tokens {
         if let Token::Word(data) = token {
             let word_lower = data.value.to_lowercase();
 
@@ -144,14 +134,13 @@ pub fn check_undefined_words(
     diagnostics
 }
 
-/// Check for unmatched delimiters (parentheses, brackets, etc.)
-pub fn check_unmatched_delimiters(rope: &Rope) -> Vec<Diagnostic> {
+/// Check for unmatched delimiters using a source string
+pub fn check_unmatched_delimiters_from_source(text: &str, rope: &Rope) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
     // Check for unmatched parentheses in comments
     // In Forth, comments are ( comment ) and the lexer tokenizes them
     // We check if there are unclosed comments by examining the source text
-    let text = rope.to_string();
     let mut paren_depth = 0;
     let mut paren_start: Option<usize> = None;
 
@@ -221,20 +210,23 @@ pub fn check_unmatched_delimiters(rope: &Rope) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Get all diagnostics for a file
-pub fn get_diagnostics(
+/// Get all diagnostics for a file using pre-parsed tokens and source string
+/// This avoids re-parsing when tokens are already available
+pub fn get_diagnostics_from_tokens(
+    tokens: &[Token],
+    source: &str,
     rope: &Rope,
     def_index: &DefinitionIndex,
     builtin_words: &Words,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-
-    // Check for undefined words
-    diagnostics.extend(check_undefined_words(rope, def_index, builtin_words));
-
-    // Check for unmatched delimiters
-    diagnostics.extend(check_unmatched_delimiters(rope));
-
+    diagnostics.extend(check_undefined_words_from_tokens(
+        tokens,
+        rope,
+        def_index,
+        builtin_words,
+    ));
+    diagnostics.extend(check_unmatched_delimiters_from_source(source, rope));
     diagnostics
 }
 
@@ -269,8 +261,29 @@ mod tests {
     use super::*;
     use crate::utils::definition_index::DefinitionIndex;
     use crate::words::Words;
+    use forth_lexer::parser::Lexer;
     use ropey::Rope;
     use std::env;
+
+    fn check_undefined_words(
+        rope: &Rope,
+        def_index: &DefinitionIndex,
+        builtin_words: &Words,
+    ) -> Vec<Diagnostic> {
+        let source = rope.to_string();
+        let tokens = Lexer::new(&source).parse();
+        check_undefined_words_from_tokens(&tokens, rope, def_index, builtin_words)
+    }
+
+    fn get_diagnostics(
+        rope: &Rope,
+        def_index: &DefinitionIndex,
+        builtin_words: &Words,
+    ) -> Vec<Diagnostic> {
+        let source = rope.to_string();
+        let tokens = Lexer::new(&source).parse();
+        get_diagnostics_from_tokens(&tokens, &source, rope, def_index, builtin_words)
+    }
 
     #[test]
     fn test_constant_definition_not_flagged() {

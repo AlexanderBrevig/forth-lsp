@@ -1,11 +1,12 @@
 #[allow(unused_imports)]
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
-use crate::utils::diagnostics::{get_diagnostics, publish_diagnostics};
+use crate::utils::diagnostics::{get_diagnostics_from_tokens, publish_diagnostics};
 use crate::words::Words;
 
 use std::collections::HashMap;
 
+use forth_lexer::parser::Lexer;
 use lsp_server::{Connection, Notification};
 use ropey::Rope;
 
@@ -50,12 +51,16 @@ pub fn handle_did_change_text_document(
                 }
             }
             log_debug!("After changes, rope has {} chars", rope.len_chars());
-            // Update definition index for the changed file
-            log_debug!("Updating definition index for: {}", file_uri);
-            def_index.update_file(&file_uri, rope);
 
-            // Publish diagnostics for the changed file
-            let diagnostics = get_diagnostics(rope, def_index, builtin_words);
+            // Parse once and reuse tokens for both indexing and diagnostics
+            let source = rope.to_string();
+            let tokens = Lexer::new(&source).parse();
+
+            log_debug!("Updating definition index for: {}", file_uri);
+            def_index.update_file_from_tokens(&file_uri, &tokens, rope);
+
+            let diagnostics =
+                get_diagnostics_from_tokens(&tokens, &source, rope, def_index, builtin_words);
             publish_diagnostics(
                 connection,
                 params.text_document.uri.clone(),

@@ -4,7 +4,7 @@ use std::mem::discriminant;
 
 /// Helper to find all colon definitions (`: word ... ;`) in a token stream.
 /// This is a common pattern used across multiple handlers.
-pub fn find_colon_definitions<'a>(tokens: &'a Vec<Token<'a>>) -> Vec<&'a [Token<'a>]> {
+pub fn find_colon_definitions<'a>(tokens: &'a [Token<'a>]) -> Vec<&'a [Token<'a>]> {
     tokens.find_variant_sublists_from_to(
         discriminant(&Token::Colon(Data::default())),
         discriminant(&Token::Semicolon(Data::default())),

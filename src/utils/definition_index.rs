@@ -36,19 +36,23 @@ impl DefinitionIndex {
     /// Update the index for a specific file
     /// This removes all old definitions and references from the file and adds new ones
     pub fn update_file(&mut self, file_path: &str, rope: &Rope) {
-        // First, remove all definitions and references from this file
-        self.remove_file(file_path);
-
-        // Parse the file and extract definitions and references
         let progn = rope.to_string();
         let mut lexer = Lexer::new(progn.as_str());
         let tokens = lexer.parse();
+        self.update_file_from_tokens(file_path, &tokens, rope);
+    }
+
+    /// Update the index for a specific file using pre-parsed tokens
+    /// This avoids re-parsing when tokens are already available
+    pub fn update_file_from_tokens(&mut self, file_path: &str, tokens: &[Token], rope: &Rope) {
+        // First, remove all definitions and references from this file
+        self.remove_file(file_path);
 
         // Track which token indices are part of word definitions (to exclude from references)
         let mut definition_token_indices = std::collections::HashSet::new();
 
         // First pass: collect colon definitions
-        for result in find_colon_definitions(&tokens) {
+        for result in find_colon_definitions(tokens) {
             if result.len() >= 2 {
                 // Mark the word name token(s) as part of definition
                 if let Token::Number(num_data) = &result[1] {
@@ -127,7 +131,7 @@ impl DefinitionIndex {
         }
 
         // Second pass: collect references (word usages)
-        for token in &tokens {
+        for token in tokens {
             if let Token::Word(data) = token {
                 // Skip if this is a word name in a definition
                 if definition_token_indices.contains(&data.start) {
