@@ -120,6 +120,16 @@ impl Formatter {
         )
     }
 
+    /// Check if a comment is a parenthetical comment (starts with '(')
+    fn is_paren_comment(comment: &str) -> bool {
+        comment.trim_start().starts_with('(')
+    }
+
+    /// Check if a comment is a line comment (starts with '\')
+    fn is_line_comment(comment: &str) -> bool {
+        comment.trim_start().starts_with('\\')
+    }
+
     /// Format a non-definition token (outside colon definitions)
     fn format_non_definition_token(
         &self,
@@ -129,10 +139,34 @@ impl Formatter {
     ) {
         match token {
             Token::Comment(data) | Token::StackComment(data) => {
-                if !output.is_empty() && !output.ends_with('\n') {
+                let is_line_comment = Self::is_line_comment(data.value);
+                let is_paren_comment = Self::is_paren_comment(data.value);
+
+                // Determine if we should add a newline before the comment
+                let should_add_newline_before = if is_paren_comment {
+                    self.config.newline_before_paren_comments
+                } else if is_line_comment {
+                    self.config.newline_before_line_comments
+                } else {
+                    // Stack comments - preserve old behavior (add newline)
+                    true
+                };
+
+                if should_add_newline_before && !output.is_empty() && !output.ends_with('\n') {
                     output.push('\n');
+                } else if !should_add_newline_before
+                    && !output.is_empty()
+                    && !output.ends_with(' ')
+                    && !output.ends_with('\n')
+                {
+                    // If not adding newline, add space for inline comments
+                    output.push(' ');
                 }
+
                 output.push_str(data.value);
+
+                // Always add newline after comment in preserve mode
+                // (line comments always end lines, paren/stack comments get newlines for readability)
                 output.push('\n');
                 *last_was_defining = false;
             }
@@ -294,11 +328,38 @@ impl Formatter {
                 }
 
                 Token::Comment(data) => {
-                    // Regular comments are unaffected by stack_comment config
-                    if !line_start && !prev_was_colon {
-                        output.push(' ');
+                    let is_line_comment = Self::is_line_comment(data.value);
+                    let is_paren_comment = Self::is_paren_comment(data.value);
+
+                    // Check if we should force a newline before this comment
+                    let should_add_newline_before = if is_paren_comment {
+                        self.config.newline_before_paren_comments
+                    } else if is_line_comment {
+                        self.config.newline_before_line_comments
+                    } else {
+                        false
+                    };
+
+                    if should_add_newline_before {
+                        if !line_start {
+                            output.push('\n');
+                            line_start = true;
+                        }
+                    } else {
+                        // Default behavior: add space before inline comment
+                        if !line_start && !prev_was_colon {
+                            output.push(' ');
+                        }
                     }
+
                     output.push_str(data.value);
+
+                    // Line comments always end with a newline (they consume the rest of the line)
+                    if is_line_comment {
+                        output.push('\n');
+                        line_start = true;
+                    }
+
                     prev_was_colon = false;
                     is_first_word_after_colon = false;
                     just_printed_stack_comment = false;
@@ -740,5 +801,82 @@ dup ;";
         // Each constant should be on its own line
         assert!(formatted.contains("10 CONSTANT MAX\n"));
         assert!(formatted.contains("42 CONSTANT ANSWER\n"));
+    }
+
+    #[test]
+    fn test_inline_paren_comment_preserved_by_default() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            newline_before_paren_comments: false, // default
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        let source = ": add ( regular comment ) + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        // Should keep comment inline, not force newline before it
+        assert_eq!(formatted, ": add ( regular comment ) + ;\n");
+    }
+
+    #[test]
+    fn test_inline_line_comment_preserved_by_default() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            newline_before_line_comments: false, // default
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        let source = ": test 1 2 \\ inline comment\n + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        // Should keep comment inline on same line as code
+        assert!(formatted.contains("1 2 \\ inline comment\n"));
+    }
+
+    #[test]
+    fn test_newline_before_paren_comments_when_enabled() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            newline_before_paren_comments: true,
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        let source = ": add ( regular paren comment ) + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        // Should force newline before paren comment
+        assert!(formatted.contains(": add\n( regular paren comment )"));
+    }
+
+    #[test]
+    fn test_newline_before_line_comments_when_enabled() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            newline_before_line_comments: true,
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        let source = ": test 1 2 \\ inline comment\n + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        // Should force newline before line comment
+        assert!(formatted.contains("1 2\n\\ inline comment\n"));
+    }
+
+    #[test]
+    fn test_preserve_newlines_mode_respects_comment_config() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            newline_before_paren_comments: false,
+            newline_before_line_comments: false,
+            ..Default::default()
+        };
+        let formatter = Formatter::new(config);
+
+        let source = ": test 1 2 ( inline paren ) + \\ inline line\n 3 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        // Should preserve inline comments even in preserve mode
+        assert!(formatted.contains("( inline paren )"));
+        assert!(formatted.contains("\\ inline line"));
     }
 }

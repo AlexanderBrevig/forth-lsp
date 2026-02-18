@@ -48,6 +48,33 @@ pub fn check_undefined_words(
         }
     }
 
+    // Also collect defining word definitions (VARIABLE, CONSTANT, CREATE, etc.)
+    let defining_words = [
+        "variable",
+        "constant",
+        "create",
+        "value",
+        "2variable",
+        "2constant",
+        "2value",
+        "fvariable",
+        "fconstant",
+        "defer",
+        "buffer:",
+    ];
+    for i in 0..tokens.len().saturating_sub(1) {
+        if let Token::Word(data) = &tokens[i] {
+            if defining_words
+                .iter()
+                .any(|&dw| dw.eq_ignore_ascii_case(data.value))
+            {
+                if let Some(Token::Word(name_data)) = tokens.get(i + 1) {
+                    local_definitions.insert(name_data.value.to_lowercase());
+                }
+            }
+        }
+    }
+
     // Add local definitions to defined words
     for word in local_definitions {
         defined_words.insert(word);
@@ -244,6 +271,75 @@ mod tests {
     use crate::words::Words;
     use ropey::Rope;
     use std::env;
+
+    #[test]
+    fn test_constant_definition_not_flagged() {
+        let rope = Rope::from_str("1 constant ONE\n: test ONE ;");
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir
+            .join("test_const.forth")
+            .to_string_lossy()
+            .to_string();
+        index.update_file(&file_path, &rope);
+        let words = Words::default();
+
+        let diagnostics = check_undefined_words(&rope, &index, &words);
+
+        // ONE should NOT be flagged as undefined - it's defined via CONSTANT
+        for d in &diagnostics {
+            eprintln!("Diagnostic: {}", d.message);
+        }
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("ONE")),
+            "ONE should not be flagged as undefined after '1 constant ONE'"
+        );
+        assert_eq!(diagnostics.len(), 0, "No diagnostics expected");
+    }
+
+    #[test]
+    fn test_constant_not_flagged_same_file_no_index() {
+        // Test the case where the file is NOT in the definition index yet
+        // local_definitions should still find CONSTANT definitions
+        let rope = Rope::from_str("1 constant ONE\n: test ONE ;");
+        let index = DefinitionIndex::new(); // Empty index!
+        let words = Words::default();
+
+        let diagnostics = check_undefined_words(&rope, &index, &words);
+
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("ONE")),
+            "ONE should not be flagged - defined via 'constant' in same file"
+        );
+    }
+
+    #[test]
+    fn test_variable_not_flagged_same_file_no_index() {
+        let rope = Rope::from_str("variable COUNT\n: test COUNT @ ;");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = check_undefined_words(&rope, &index, &words);
+
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("COUNT")),
+            "COUNT should not be flagged - defined via 'variable' in same file"
+        );
+    }
+
+    #[test]
+    fn test_value_not_flagged_same_file_no_index() {
+        let rope = Rope::from_str("10 value LIMIT\n: test LIMIT ;");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = check_undefined_words(&rope, &index, &words);
+
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("LIMIT")),
+            "LIMIT should not be flagged - defined via 'value' in same file"
+        );
+    }
 
     #[test]
     fn test_no_diagnostics_for_valid_code() {

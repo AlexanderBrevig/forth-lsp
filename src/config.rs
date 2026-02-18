@@ -53,6 +53,18 @@ pub struct FormatConfig {
     /// Helps visually separate definitions
     #[serde(default = "default_true")]
     pub blank_line_between_definitions: bool,
+
+    /// Add newline before parenthetical comments `( comment )`
+    /// When false (default): preserves original whitespace
+    /// When true: forces newline before paren comments
+    #[serde(default)]
+    pub newline_before_paren_comments: bool,
+
+    /// Add newline before line comments `\ comment`
+    /// When false (default): preserves original whitespace
+    /// When true: forces newline before line comments
+    #[serde(default)]
+    pub newline_before_line_comments: bool,
 }
 
 impl Default for FormatConfig {
@@ -67,6 +79,8 @@ impl Default for FormatConfig {
             stack_comment_on_declaration_line: default_true(),
             preserve_definition_newlines: false,
             blank_line_between_definitions: default_true(),
+            newline_before_paren_comments: false,
+            newline_before_line_comments: false,
         }
     }
 }
