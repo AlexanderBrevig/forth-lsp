@@ -1,7 +1,9 @@
+use crate::utils::handlers::request_semantic_tokens::semantic_tokens_capabilities;
 use lsp_types::{OneOf, ServerCapabilities, TextDocumentSyncKind};
 
 pub fn forth_lsp_capabilities() -> ServerCapabilities {
     ServerCapabilities {
+        semantic_tokens_provider: Some(semantic_tokens_capabilities()),
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Kind(
             TextDocumentSyncKind::INCREMENTAL,
         )),

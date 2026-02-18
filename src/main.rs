@@ -19,6 +19,7 @@ use crate::utils::handlers::request_goto_definition::handle_goto_definition;
 use crate::utils::handlers::request_hover::handle_hover;
 use crate::utils::handlers::request_prepare_rename::handle_prepare_rename;
 use crate::utils::handlers::request_rename::handle_rename;
+use crate::utils::handlers::request_semantic_tokens::handle_semantic_tokens_full;
 use crate::utils::handlers::request_signature_help::handle_signature_help;
 use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
 use crate::utils::server_capabilities::forth_lsp_capabilities;
@@ -120,6 +121,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     continue;
                 }
                 if handle_formatting(&request, &connection, &files, &config).is_ok() {
+                    continue;
+                }
+                if handle_semantic_tokens_full(&request, &connection, &mut files, &data).is_ok() {
                     continue;
                 }
             }

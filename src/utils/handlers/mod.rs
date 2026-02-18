@@ -13,6 +13,7 @@ pub mod request_goto_definition;
 pub mod request_hover;
 pub mod request_prepare_rename;
 pub mod request_rename;
+pub mod request_semantic_tokens;
 pub mod request_signature_help;
 pub mod request_workspace_symbols;
 

@@ -31,7 +31,7 @@ impl<'a> ToPosition for Data<'a> {
     }
 }
 
-fn to_line_char(chix: usize, rope: &ropey::Rope) -> (u32, u32) {
+pub fn to_line_char(chix: usize, rope: &ropey::Rope) -> (u32, u32) {
     let start_line = rope.char_to_line(chix) as u32;
     let start_char = (chix - rope.line_to_char(start_line as usize)) as u32;
     (start_line, start_char)
