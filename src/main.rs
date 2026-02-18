@@ -108,7 +108,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                 if handle_rename(&request, &connection, &mut files, &def_index).is_ok() {
                     continue;
                 }
-                if handle_signature_help(&request, &connection, &mut files, &data).is_ok() {
+                if handle_signature_help(&request, &connection, &mut files, &data, &def_index)
+                    .is_ok()
+                {
                     continue;
                 }
                 if handle_document_symbols(&request, &connection, &mut files).is_ok() {

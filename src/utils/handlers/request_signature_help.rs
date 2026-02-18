@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use crate::prelude::*;
+use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::{common::ExtractedPosition, send_response};
 use crate::utils::ropey::word_on_or_before::WordOnOrBefore;
 use crate::utils::word_lookup::find_builtin_word;
@@ -13,20 +14,39 @@ use std::collections::HashMap;
 use super::cast;
 
 // Extract signature help logic for testing
-pub fn get_signature_help(word: &str, builtin_words: &Words) -> Option<SignatureHelp> {
+pub fn get_signature_help(
+    word: &str,
+    builtin_words: &Words,
+    def_index: &DefinitionIndex,
+) -> Option<SignatureHelp> {
     if word.is_empty() {
         return None;
     }
 
-    // Find the word in built-in words
-    let word_info = find_builtin_word(word, builtin_words)?;
+    // Try built-in words first
+    if let Some(word_info) = find_builtin_word(word, builtin_words) {
+        let stack_effect = extract_stack_effect(&word_info.documentation());
 
-    // Extract stack effect from documentation
-    let stack_effect = extract_stack_effect(&word_info.documentation());
+        let signature = SignatureInformation {
+            label: format!("{} {}", word_info.token, stack_effect),
+            documentation: Some(lsp_types::Documentation::String(word_info.documentation())),
+            parameters: None,
+            active_parameter: None,
+        };
+
+        return Some(SignatureHelp {
+            signatures: vec![signature],
+            active_signature: Some(0),
+            active_parameter: None,
+        });
+    }
+
+    // Fall back to user-defined words
+    let stack_effect = def_index.find_stack_effect(word)?;
 
     let signature = SignatureInformation {
-        label: format!("{} {}", word_info.token, stack_effect),
-        documentation: Some(lsp_types::Documentation::String(word_info.documentation())),
+        label: format!("{} {}", word, stack_effect),
+        documentation: None,
         parameters: None,
         active_parameter: None,
     };
@@ -62,6 +82,7 @@ pub fn handle_signature_help(
     connection: &Connection,
     files: &mut HashMap<String, Rope>,
     builtin_words: &Words,
+    def_index: &DefinitionIndex,
 ) -> Result<()> {
     match cast::<SignatureHelpRequest>(req.clone()) {
         Ok((id, params)) => {
@@ -99,7 +120,7 @@ pub fn handle_signature_help(
             }
 
             let word = rope.word_on_or_before(ix).to_string();
-            let signature_help = get_signature_help(&word, builtin_words);
+            let signature_help = get_signature_help(&word, builtin_words, def_index);
 
             send_response(connection, id, signature_help)?;
             Ok(())
@@ -115,12 +136,20 @@ pub fn handle_signature_help(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::definition_index::DefinitionIndex;
     use crate::words::Words;
+    use ropey::Rope;
+    use std::env;
+
+    fn empty_index() -> DefinitionIndex {
+        DefinitionIndex::new()
+    }
 
     #[test]
     fn test_signature_help_builtin_word() {
         let words = Words::default();
-        let sig = get_signature_help("DUP", &words);
+        let idx = empty_index();
+        let sig = get_signature_help("DUP", &words, &idx);
 
         assert!(sig.is_some());
         let sig = sig.unwrap();
@@ -132,8 +161,9 @@ mod tests {
     #[test]
     fn test_signature_help_case_insensitive() {
         let words = Words::default();
-        let sig_upper = get_signature_help("SWAP", &words);
-        let sig_lower = get_signature_help("swap", &words);
+        let idx = empty_index();
+        let sig_upper = get_signature_help("SWAP", &words, &idx);
+        let sig_lower = get_signature_help("swap", &words, &idx);
 
         assert!(sig_upper.is_some());
         assert!(sig_lower.is_some());
@@ -147,7 +177,8 @@ mod tests {
     #[test]
     fn test_signature_help_unknown_word() {
         let words = Words::default();
-        let sig = get_signature_help("NONEXISTENT_WORD_12345", &words);
+        let idx = empty_index();
+        let sig = get_signature_help("NONEXISTENT_WORD_12345", &words, &idx);
 
         assert!(sig.is_none());
     }
@@ -155,7 +186,8 @@ mod tests {
     #[test]
     fn test_signature_help_empty_word() {
         let words = Words::default();
-        let sig = get_signature_help("", &words);
+        let idx = empty_index();
+        let sig = get_signature_help("", &words, &idx);
 
         assert!(sig.is_none());
     }
@@ -163,10 +195,11 @@ mod tests {
     #[test]
     fn test_signature_help_arithmetic_operators() {
         let words = Words::default();
+        let idx = empty_index();
         let test_words = vec!["+", "-", "*", "/"];
 
         for word in test_words {
-            let sig = get_signature_help(word, &words);
+            let sig = get_signature_help(word, &words, &idx);
             assert!(sig.is_some(), "Expected signature for '{}'", word);
 
             let sig = sig.unwrap();
@@ -179,7 +212,8 @@ mod tests {
     #[test]
     fn test_signature_help_has_documentation() {
         let words = Words::default();
-        let sig = get_signature_help("DROP", &words);
+        let idx = empty_index();
+        let sig = get_signature_help("DROP", &words, &idx);
 
         assert!(sig.is_some());
         let sig = sig.unwrap();
@@ -215,12 +249,63 @@ mod tests {
     #[test]
     fn test_signature_help_active_signature() {
         let words = Words::default();
-        let sig = get_signature_help("DUP", &words);
+        let idx = empty_index();
+        let sig = get_signature_help("DUP", &words, &idx);
 
         assert!(sig.is_some());
         let sig = sig.unwrap();
 
         // Should have active signature set to 0
         assert_eq!(sig.active_signature, Some(0));
+    }
+
+    #[test]
+    fn test_signature_help_user_defined() {
+        let words = Words::default();
+        let mut idx = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        idx.update_file(&file_path, &Rope::from_str(": foo ( n -- n ) 1 + ;"));
+
+        let sig = get_signature_help("foo", &words, &idx);
+        assert!(sig.is_some());
+        let sig = sig.unwrap();
+        assert_eq!(sig.signatures.len(), 1);
+        assert!(sig.signatures[0].label.contains("foo"));
+        assert!(sig.signatures[0].label.contains("( n -- n )"));
+    }
+
+    #[test]
+    fn test_signature_help_user_defined_no_stack_comment() {
+        let words = Words::default();
+        let mut idx = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        idx.update_file(&file_path, &Rope::from_str(": bar 1 + ;"));
+
+        let sig = get_signature_help("bar", &words, &idx);
+        // No stack comment means no signature help for user-defined word
+        assert!(sig.is_none());
+    }
+
+    #[test]
+    fn test_signature_help_builtin_takes_precedence() {
+        let words = Words::default();
+        let mut idx = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        // Define a word with the same name as a builtin
+        idx.update_file(&file_path, &Rope::from_str(": DUP ( custom -- custom ) ;"));
+
+        let sig = get_signature_help("DUP", &words, &idx);
+        assert!(sig.is_some());
+        let sig = sig.unwrap();
+        // Should use builtin's stack effect, not user-defined
+        assert!(sig.signatures[0].label.contains("( x -- x x )"));
+        // Should have builtin documentation
+        assert!(sig.signatures[0].documentation.is_some());
     }
 }

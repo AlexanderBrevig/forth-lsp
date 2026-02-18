@@ -17,8 +17,8 @@ use super::{
 pub struct DefinitionIndex {
     /// Maps lowercase word names to their definition locations
     /// Key: word name (lowercase for case-insensitive lookup)
-    /// Value: list of (file_path, range) tuples
-    definitions: HashMap<String, Vec<(String, Range)>>,
+    /// Value: list of (file_path, range, optional_stack_effect) tuples
+    definitions: HashMap<String, Vec<(String, Range, Option<String>)>>,
     /// Maps lowercase word names to their reference (usage) locations
     /// Key: word name (lowercase for case-insensitive lookup)
     /// Value: list of (file_path, range) tuples
@@ -79,11 +79,20 @@ impl DefinitionIndex {
                 let name_data = Data::new(selection_start, selection_end, "");
                 let range = data_range_from_to(&name_data, &name_data, rope);
 
+                // Scan for a StackComment token to capture stack effect
+                let stack_effect = result.iter().skip(2).find_map(|tok| {
+                    if let Token::StackComment(data) = tok {
+                        Some(data.value.to_string())
+                    } else {
+                        None
+                    }
+                });
+
                 // Store with lowercase key for case-insensitive lookup
                 self.definitions
                     .entry(name.to_lowercase())
                     .or_default()
-                    .push((file_path.to_string(), range));
+                    .push((file_path.to_string(), range, stack_effect));
             }
         }
 
@@ -124,7 +133,7 @@ impl DefinitionIndex {
                         self.definitions
                             .entry(name.to_lowercase())
                             .or_default()
-                            .push((file_path.to_string(), range));
+                            .push((file_path.to_string(), range, None));
                     }
                 }
             }
@@ -152,7 +161,7 @@ impl DefinitionIndex {
     pub fn remove_file(&mut self, file_path: &str) {
         // Remove all definitions that reference this file
         for locations in self.definitions.values_mut() {
-            locations.retain(|(path, _)| path != file_path);
+            locations.retain(|(path, _, _)| path != file_path);
         }
         self.definitions
             .retain(|_, locations| !locations.is_empty());
@@ -169,7 +178,7 @@ impl DefinitionIndex {
         let mut locations = Vec::new();
 
         if let Some(defs) = self.definitions.get(&word.to_lowercase()) {
-            for (file_path_or_uri, range) in defs {
+            for (file_path_or_uri, range, _) in defs {
                 // Try parsing as URI first (file:// scheme), then fall back to file path
                 let uri = if file_path_or_uri.starts_with("file://") {
                     file_path_or_uri.parse().ok()
@@ -184,6 +193,14 @@ impl DefinitionIndex {
         }
 
         locations
+    }
+
+    /// Find the stack effect for the first definition of a word (case-insensitive)
+    pub fn find_stack_effect(&self, word: &str) -> Option<String> {
+        self.definitions
+            .get(&word.to_lowercase())?
+            .iter()
+            .find_map(|(_, _, effect)| effect.clone())
     }
 
     /// Find all references (usages) of a word (case-insensitive)
@@ -608,5 +625,42 @@ mod tests {
         // Should find 1 reference (in the test word)
         let refs = index.find_references("x");
         assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn test_find_stack_effect() {
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        index.update_file(&file_path, &Rope::from_str(": foo ( n -- n ) 1 + ;"));
+
+        let effect = index.find_stack_effect("foo");
+        assert_eq!(effect, Some("( n -- n )".to_string()));
+    }
+
+    #[test]
+    fn test_find_stack_effect_no_comment() {
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        index.update_file(&file_path, &Rope::from_str(": bar 1 + ;"));
+
+        let effect = index.find_stack_effect("bar");
+        assert_eq!(effect, None);
+    }
+
+    #[test]
+    fn test_find_stack_effect_case_insensitive() {
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        index.update_file(&file_path, &Rope::from_str(": MyWord ( a b -- c ) + ;"));
+
+        assert!(index.find_stack_effect("myword").is_some());
+        assert!(index.find_stack_effect("MYWORD").is_some());
+        assert!(index.find_stack_effect("MyWord").is_some());
     }
 }
