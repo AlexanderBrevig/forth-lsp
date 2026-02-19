@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::words::Word;
+
 /// Configuration for the Forth LSP server
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
@@ -107,6 +109,75 @@ pub struct BuiltinConfig {
     /// Supports both simple string format and detailed metadata format
     #[serde(default)]
     pub words: Vec<CustomWord>,
+
+    /// Paths to files containing whitespace-separated word lists
+    /// (e.g. output of `gforth -e 'words bye'`)
+    /// Paths are relative to workspace root or absolute
+    #[serde(default)]
+    pub word_files: Vec<String>,
+}
+
+impl BuiltinConfig {
+    /// Read word files and return parsed custom words.
+    /// Paths are resolved relative to `workspace_root` unless absolute.
+    pub fn load_words_from_files(&self, workspace_root: &str) -> Vec<CustomWord> {
+        let root = PathBuf::from(workspace_root);
+        let mut words = Vec::new();
+        for file_path in &self.word_files {
+            let path = if Path::new(file_path).is_absolute() {
+                PathBuf::from(file_path)
+            } else {
+                root.join(file_path)
+            };
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    for token in content.split_whitespace() {
+                        words.push(CustomWord {
+                            word: token.to_string(),
+                            stack: None,
+                            description: None,
+                        });
+                    }
+                    eprintln!("Loaded word file {:?}", path);
+                }
+                Err(e) => {
+                    eprintln!("Failed to read word file {:?}: {}", path, e);
+                }
+            }
+        }
+        words
+    }
+
+    /// Convert all custom words (inline + from files) into leaked `Word<'static>` references
+    /// suitable for pushing into `Words.words`. Since the LSP runs for the process lifetime,
+    /// leaking is appropriate.
+    pub fn into_static_words(&self, workspace_root: Option<&str>) -> Vec<&'static Word<'static>> {
+        let mut all_custom = self.words.clone();
+        if let Some(root) = workspace_root {
+            all_custom.extend(self.load_words_from_files(root));
+        }
+        all_custom
+            .into_iter()
+            .map(|cw| {
+                let token: &'static str = Box::leak(cw.word.into_boxed_str());
+                let stack: &'static str = match cw.stack {
+                    Some(s) => Box::leak(s.into_boxed_str()),
+                    None => "",
+                };
+                let help: &'static str = match cw.description {
+                    Some(s) => Box::leak(s.into_boxed_str()),
+                    None => "",
+                };
+                let word = Box::new(Word {
+                    doc: "",
+                    token,
+                    stack,
+                    help,
+                });
+                &*Box::leak(word)
+            })
+            .collect()
+    }
 }
 
 fn default_indent_width() -> usize {
@@ -316,5 +387,106 @@ mod tests {
         // Should use defaults for missing fields
         assert!(config.format.use_spaces);
         assert_eq!(config.format.word_spacing, 1);
+    }
+
+    #[test]
+    fn test_parse_word_files_config() {
+        let toml_content = r#"
+            [builtin]
+            word_files = ["gforth.words", "/absolute/path.words"]
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.builtin.word_files.len(), 2);
+        assert_eq!(config.builtin.word_files[0], "gforth.words");
+        assert_eq!(config.builtin.word_files[1], "/absolute/path.words");
+    }
+
+    #[test]
+    fn test_word_files_default_empty() {
+        let config = Config::default();
+        assert!(config.builtin.word_files.is_empty());
+    }
+
+    #[test]
+    fn test_load_words_from_files() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let words_path = dir.path().join("test.words");
+        std::fs::write(&words_path, "DUP SWAP OVER\n  ROT  DROP\n").unwrap();
+
+        let config = BuiltinConfig {
+            words: vec![],
+            word_files: vec!["test.words".to_string()],
+        };
+
+        let words = config.load_words_from_files(dir.path().to_str().unwrap());
+        assert_eq!(words.len(), 5);
+        assert_eq!(words[0].word, "DUP");
+        assert_eq!(words[1].word, "SWAP");
+        assert_eq!(words[2].word, "OVER");
+        assert_eq!(words[3].word, "ROT");
+        assert_eq!(words[4].word, "DROP");
+        // All loaded from file should have no stack/description
+        assert_eq!(words[0].stack, None);
+        assert_eq!(words[0].description, None);
+    }
+
+    #[test]
+    fn test_load_words_from_absolute_path() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let words_path = dir.path().join("abs.words");
+        std::fs::write(&words_path, "EMIT CR").unwrap();
+
+        let config = BuiltinConfig {
+            words: vec![],
+            word_files: vec![words_path.to_str().unwrap().to_string()],
+        };
+
+        // workspace_root doesn't matter for absolute paths
+        let words = config.load_words_from_files("/nonexistent");
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0].word, "EMIT");
+        assert_eq!(words[1].word, "CR");
+    }
+
+    #[test]
+    fn test_load_words_missing_file_skipped() {
+        let config = BuiltinConfig {
+            words: vec![],
+            word_files: vec!["nonexistent.words".to_string()],
+        };
+
+        let words = config.load_words_from_files("/tmp");
+        assert!(words.is_empty());
+    }
+
+    #[test]
+    fn test_into_static_words_combines_inline_and_files() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let words_path = dir.path().join("extra.words");
+        std::fs::write(&words_path, "FILEW1 FILEW2").unwrap();
+
+        let config = BuiltinConfig {
+            words: vec![CustomWord {
+                word: "INLINE1".to_string(),
+                stack: Some("( -- )".to_string()),
+                description: Some("An inline word".to_string()),
+            }],
+            word_files: vec!["extra.words".to_string()],
+        };
+
+        let static_words = config.into_static_words(Some(dir.path().to_str().unwrap()));
+        assert_eq!(static_words.len(), 3);
+        assert_eq!(static_words[0].token, "INLINE1");
+        assert_eq!(static_words[0].stack, "( -- )");
+        assert_eq!(static_words[0].help, "An inline word");
+        assert_eq!(static_words[1].token, "FILEW1");
+        assert_eq!(static_words[2].token, "FILEW2");
     }
 }

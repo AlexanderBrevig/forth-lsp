@@ -137,7 +137,7 @@ impl Default for Words<'_> {
                 },
                 &Word {
                     doc: "/ZeroEqual",
-                    token: ":",
+                    token: "0=",
                     stack: "( x -- flag )",
                     help: "flag is true if and only if x is equal to zero.",
                 },
@@ -1022,12 +1022,6 @@ impl Default for Words<'_> {
                     token: "ROLL",
                     stack: "( xu xu-1 ... x0 u -- xu-1 ... x0 xu )",
                     help: "Remove u. Rotate u+1 items on the top of the stack. An ambiguous condition exists if there are less than u+2 items on the stack before ROLL is executed.",
-                },
-                &Word {
-                    doc: "/Seq",
-                    token: "S\"",
-                    stack: "( 'ccc<quote>' -- )",
-                    help: "Parse ccc delimited by \" (double-quote), using the translation rules below. Append the run-time semantics given below to the current definition.",
                 },
                 &Word {
                     doc: "/SAVE-INPUT",

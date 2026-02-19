@@ -61,12 +61,12 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     let mut files = HashMap::<String, Rope>::new();
 
     // Load configuration from workspace root
-    let workspace_root = init
+    let workspace_root: Option<String> = init
         .workspace_folders
         .as_ref()
         .and_then(|folders| folders.first())
-        .map(|folder| folder.uri.path().as_str());
-    let config = Config::load_from_workspace(workspace_root);
+        .map(|folder| folder.uri.path().to_string());
+    let config = Config::load_from_workspace(workspace_root.as_deref());
 
     if let Some(roots) = init.workspace_folders {
         eprintln!("Root: {:?}", roots);
@@ -82,7 +82,9 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     }
     eprintln!("Indexed {} files", files.len());
 
-    let data = Words::default();
+    let mut data = Words::default();
+    let custom_words = config.builtin.into_static_words(workspace_root.as_deref());
+    data.words.extend(custom_words);
     for msg in &connection.receiver {
         match msg {
             Message::Request(request) => {

@@ -25,6 +25,26 @@ cargo install forth-lsp
 
 Then configure your editor to use `forth-lsp`. Works with any LSP-compatible editor (VS Code, Neovim, Helix, Emacs, etc.).
 
+## Configuration
+
+Create a `.forth-lsp.toml` in your workspace root:
+
+```toml
+[builtin]
+# Point at word list files (e.g. gforth -e 'words bye' > gforth.words)
+word_files = ["gforth.words"]
+
+# Or define words inline
+[[builtin.words]]
+word = "MY-WORD"
+stack = "( n -- )"
+description = "Does something special"
+
+[format]
+indent_width = 2
+use_spaces = true
+```
+
 ## Contributing
 
 [Issues](https://github.com/AlexanderBrevig/forth-lsp/issues) and [PRs](https://github.com/AlexanderBrevig/forth-lsp/pulls) welcome!
