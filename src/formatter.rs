@@ -4,18 +4,39 @@ use forth_lexer::{parser::Lexer, token::Token};
 use lsp_types::{Position, Range, TextEdit};
 use ropey::Rope;
 
+/// Formatter trait for formatting Forth source code
+pub trait Formatter {
+    /// Format the entire document and return a TextEdit to replace all content
+    fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>>;
+
+    /// Format the source code string and return formatted string
+    fn format_source(&self, source: &str) -> Result<String>;
+}
+
+/// Creates a formatter based on if FormatConfig.enabled is true
+pub fn create_formatter(config: FormatConfig) -> Box<dyn Formatter> {
+    if config.enabled {
+        eprintln!("[DEBUG] Using DefaultFormatter");
+        Box::new(DefaultFormatter::new(config))
+    } else {
+        eprintln!("[DEBUG] Using NullFormatter");
+        Box::new(NullFormatter::new())
+    }
+}
+
 /// Formats Forth source code according to the provided configuration
-pub struct Formatter {
+pub struct DefaultFormatter {
     config: FormatConfig,
 }
 
-impl Formatter {
+impl DefaultFormatter {
     pub fn new(config: FormatConfig) -> Self {
         Self { config }
     }
+}
 
-    /// Format the entire document and return a TextEdit to replace all content
-    pub fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>> {
+impl Formatter for DefaultFormatter {
+    fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>> {
         let source = rope.to_string();
         let formatted = self.format_source(&source)?;
 
@@ -29,8 +50,7 @@ impl Formatter {
         }])
     }
 
-    /// Format the source code string and return formatted string
-    pub fn format_source(&self, source: &str) -> Result<String> {
+    fn format_source(&self, source: &str) -> Result<String> {
         let mut lexer = Lexer::new(source);
         let tokens = lexer.parse();
 
@@ -42,7 +62,9 @@ impl Formatter {
         };
         Ok(formatted)
     }
+}
 
+impl DefaultFormatter {
     /// Format a colon definition while preserving its internal newlines
     fn format_preserved_definition(
         &self,
@@ -459,7 +481,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ":   add   +  ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -472,7 +494,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -486,7 +508,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -500,7 +522,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -514,7 +536,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -527,7 +549,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": abs dup 0 < if negate then ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -538,7 +560,7 @@ mod tests {
     #[test]
     fn test_multiple_definitions() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -552,7 +574,7 @@ mod tests {
     #[test]
     fn test_comments_preserved() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = r"\ This is a comment
 : test ( a b -- c ) + ;";
@@ -568,7 +590,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -582,7 +604,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -595,7 +617,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 0 10 do i 2 mod 0 = if i . then loop ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -607,7 +629,7 @@ mod tests {
     #[test]
     fn test_format_document_returns_text_edit() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ":   square   dup   *   ;";
         let rope = Rope::from_str(source);
@@ -620,7 +642,7 @@ mod tests {
     #[test]
     fn test_stack_comment_on_declaration_line_default() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -634,7 +656,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -648,7 +670,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -663,7 +685,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = r": test \ inline comment
 dup ;";
@@ -675,7 +697,7 @@ dup ;";
     #[test]
     fn test_blank_line_between_definitions_default() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -692,7 +714,7 @@ dup ;";
             blank_line_between_definitions: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -703,7 +725,7 @@ dup ;";
     #[test]
     fn test_blank_line_three_definitions() {
         let config = FormatConfig::default();
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": a 1 ; : b 2 ; : c 3 ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -716,7 +738,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test\n  1 2 +\n  3 4 *\n  + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -730,7 +752,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": a\n  1\n  2 + ;\n: b\n  dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -744,7 +766,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test\n  \\ comment\n  1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -757,7 +779,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         // Test that comments, constants, variables outside definitions are preserved
         let source = "\\ File header comment\n10 CONSTANT MAX\n: double dup * ;\n\\ Footer comment";
@@ -776,7 +798,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = "VARIABLE counter\n100 CONSTANT LIMIT\n: increment counter @ 1 + counter ! ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -792,7 +814,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         // Multiple constants on one line should be split
         let source = "10 CONSTANT MAX 42 CONSTANT ANSWER";
@@ -810,7 +832,7 @@ dup ;";
             newline_before_paren_comments: false, // default
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": add ( regular comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -825,7 +847,7 @@ dup ;";
             newline_before_line_comments: false, // default
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -840,7 +862,7 @@ dup ;";
             newline_before_paren_comments: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": add ( regular paren comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -855,7 +877,7 @@ dup ;";
             newline_before_line_comments: true,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -871,12 +893,37 @@ dup ;";
             newline_before_line_comments: false,
             ..Default::default()
         };
-        let formatter = Formatter::new(config);
+        let formatter = DefaultFormatter::new(config);
 
         let source = ": test 1 2 ( inline paren ) + \\ inline line\n 3 ;";
         let formatted = formatter.format_source(source).unwrap();
         // Should preserve inline comments even in preserve mode
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
+    }
+}
+
+pub struct NullFormatter;
+
+impl NullFormatter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Formatter for NullFormatter {
+    fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>> {
+        let source = rope.to_string();
+        Ok(vec![TextEdit {
+            range: Range::new(
+                Position::new(0, 0),
+                Position::new(rope.len_lines() as u32, 0),
+            ),
+            new_text: source,
+        }])
+    }
+
+    fn format_source(&self, source: &str) -> Result<String> {
+        Ok(source.to_string())
     }
 }

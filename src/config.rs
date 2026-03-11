@@ -16,6 +16,10 @@ pub struct Config {
 /// Formatter configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FormatConfig {
+    /// Control if the formatter should run or not
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
     /// Number of spaces for indentation
     #[serde(default = "default_indent_width")]
     pub indent_width: usize,
@@ -72,6 +76,7 @@ pub struct FormatConfig {
 impl Default for FormatConfig {
     fn default() -> Self {
         Self {
+            enabled: default_true(),
             indent_width: default_indent_width(),
             use_spaces: default_use_spaces(),
             space_after_colon: default_true(),
