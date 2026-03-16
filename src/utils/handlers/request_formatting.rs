@@ -5,7 +5,7 @@ use crate::{config::Config, formatter::create_formatter, utils::handlers::send_r
 use std::collections::HashMap;
 
 use lsp_server::{Connection, Request};
-use lsp_types::{request::Formatting, DocumentFormattingParams, TextEdit};
+use lsp_types::{DocumentFormattingParams, TextEdit, request::Formatting};
 use ropey::Rope;
 
 use super::cast;
