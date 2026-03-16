@@ -1,6 +1,6 @@
 #[allow(unused_imports)]
 use crate::prelude::*;
-use crate::{config::Config, formatter::Formatter, utils::handlers::send_response};
+use crate::{config::Config, formatter::create_formatter, utils::handlers::send_response};
 
 use std::collections::HashMap;
 
@@ -42,7 +42,7 @@ fn get_formatting_edits(
     let file_uri = params.text_document.uri.to_string();
     let rope = files.get(&file_uri)?;
 
-    let formatter = Formatter::new(config.format.clone());
+    let formatter = create_formatter(config.format.clone());
     formatter.format_document(rope).ok()
 }
 
