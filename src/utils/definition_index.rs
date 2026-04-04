@@ -110,6 +110,7 @@ impl DefinitionIndex {
             "FCONSTANT",
             "DEFER",
             "BUFFER:",
+            "CODE",
         ];
 
         for i in 0..tokens.len().saturating_sub(1) {

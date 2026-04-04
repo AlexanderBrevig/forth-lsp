@@ -55,6 +55,7 @@ pub fn check_undefined_words_from_tokens(
         "fconstant",
         "defer",
         "buffer:",
+        "code",
     ];
     for i in 0..tokens.len().saturating_sub(1) {
         if let Token::Word(data) = &tokens[i]
@@ -93,6 +94,15 @@ pub fn check_undefined_words_from_tokens(
 
             // Skip words inside string literals
             if in_string_literal {
+                continue;
+            }
+
+            // Skip defining words and definition terminators
+            if defining_words
+                .iter()
+                .any(|&dw| dw.eq_ignore_ascii_case(data.value))
+                || data.value.eq_ignore_ascii_case("END-CODE")
+            {
                 continue;
             }
 

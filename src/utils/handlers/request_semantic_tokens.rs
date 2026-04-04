@@ -33,7 +33,7 @@ const MODIFIER_DEFAULT_LIBRARY: u32 = 1 << 1;
 /// Control-flow words that should be highlighted as keywords
 const CONTROL_FLOW_WORDS: &[&str] = &[
     "IF", "THEN", "ELSE", "DO", "LOOP", "BEGIN", "UNTIL", "WHILE", "REPEAT", "CASE", "ENDCASE",
-    "OF", "ENDOF", "+LOOP", "DOES>", "EXIT", "LEAVE", "UNLOOP", "?DO", "RECURSE",
+    "OF", "ENDOF", "+LOOP", "DOES>", "EXIT", "LEAVE", "UNLOOP", "?DO", "RECURSE", "END-CODE",
 ];
 
 /// Defining words that should be highlighted as keywords
@@ -49,6 +49,7 @@ const DEFINING_WORDS: &[&str] = &[
     "FCONSTANT",
     "DEFER",
     "BUFFER:",
+    "CODE",
 ];
 
 fn is_control_flow_word(word: &str) -> bool {
