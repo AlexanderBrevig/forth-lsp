@@ -650,4 +650,25 @@ mod tests {
         // Should not flag any usage of MyWord regardless of case
         assert_eq!(diagnostics.len(), 0);
     }
+
+    #[test]
+    fn test_code_definition_not_flagged() {
+        let rope = Rope::from_str("CODE syscall0 MOV RAX RBX END-CODE\n: test syscall0 ;");
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test_code.forth").to_string_lossy().to_string();
+        index.update_file(&file_path, &rope);
+        let words = Words::default();
+
+        let diagnostics = check_undefined_words(&rope, &index, &words);
+
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("syscall0")),
+            "syscall0 should not be flagged - defined via CODE"
+        );
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("END-CODE")),
+            "END-CODE should not be flagged as undefined"
+        );
+    }
 }
