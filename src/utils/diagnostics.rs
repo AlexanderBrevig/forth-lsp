@@ -656,7 +656,10 @@ mod tests {
         let rope = Rope::from_str("CODE syscall0 MOV RAX RBX END-CODE\n: test syscall0 ;");
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
-        let file_path = temp_dir.join("test_code.forth").to_string_lossy().to_string();
+        let file_path = temp_dir
+            .join("test_code.forth")
+            .to_string_lossy()
+            .to_string();
         index.update_file(&file_path, &rope);
         let words = Words::default();
 
