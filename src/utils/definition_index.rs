@@ -110,6 +110,7 @@ impl DefinitionIndex {
             "FCONSTANT",
             "DEFER",
             "BUFFER:",
+            "CODE",
         ];
 
         for i in 0..tokens.len().saturating_sub(1) {
@@ -662,5 +663,23 @@ mod tests {
         assert!(index.find_stack_effect("myword").is_some());
         assert!(index.find_stack_effect("MYWORD").is_some());
         assert!(index.find_stack_effect("MyWord").is_some());
+    }
+
+    #[test]
+    fn test_code_definition() {
+        let mut index = DefinitionIndex::new();
+        let temp_dir = env::temp_dir();
+        let file_path = temp_dir.join("test.forth").to_string_lossy().to_string();
+
+        index.update_file(
+            &file_path,
+            &Rope::from_str("CODE syscall0 MOV RAX RBX END-CODE\n: test syscall0 ;"),
+        );
+
+        let defs = index.find_definitions("syscall0");
+        assert_eq!(defs.len(), 1);
+
+        let refs = index.find_references("syscall0");
+        assert_eq!(refs.len(), 1);
     }
 }
