@@ -1,5 +1,7 @@
 use std::{iter::Peekable, str::Chars};
 
+use nom::AsChar;
+
 use crate::token::{Data, Token};
 
 pub enum LexError {}
@@ -98,7 +100,7 @@ impl<'a> Lexer<'a> {
         self.input.next();
 
         self.position = self.read_position;
-        self.read_position += 1;
+        self.read_position += self.ch.len();
     }
 
     fn parse_number(&mut self) -> Token<'a> {
@@ -277,6 +279,14 @@ mod tests {
             Word(Data::new(5, 10, "words")),
             Word(Data::new(11, 15, "here")),
         ];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_word_ut8() {
+        let mut lexer = Lexer::new("👻");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 4, "👻"))];
         assert_eq!(tokens, expected)
     }
 
