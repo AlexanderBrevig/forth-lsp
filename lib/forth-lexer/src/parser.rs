@@ -1,7 +1,5 @@
 use std::{iter::Peekable, str::Chars};
 
-use nom::AsChar;
-
 use crate::token::{Data, Token};
 
 pub enum LexError {}
@@ -9,6 +7,7 @@ pub enum LexError {}
 pub struct Lexer<'a> {
     position: usize,
     read_position: usize,
+    token_start: usize,
     ch: char,
     raw: &'a str,
     input: Peekable<Chars<'a>>,
@@ -19,6 +18,7 @@ impl<'a> Lexer<'a> {
         let mut lex = Lexer {
             position: 0,
             read_position: 0,
+            token_start: 0,
             ch: '0',
             input: input.chars().peekable(),
             raw: input,
@@ -26,12 +26,6 @@ impl<'a> Lexer<'a> {
         lex.read_char();
 
         lex
-    }
-
-    pub fn reset(&mut self) {
-        self.position = 0;
-        self.read_position = 0;
-        self.ch = '\0';
     }
 
     pub fn here(&self) -> Data<'a> {
@@ -42,32 +36,38 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn current_token_data(&self) -> Data<'a> {
+        let start = self.token_start;
+        let end = self.position.min(self.raw.len());
+        Data {
+            start,
+            end,
+            value: &self.raw[start..end],
+        }
+    }
+
     pub fn next_token(&mut self) -> Result<Token<'a>, LexError> {
         self.skip_whitespace();
 
+        self.token_start = self.position;
+
         let tok = match self.ch {
-            ':' => Token::Colon(self.read_single_char_token()),
-            ';' => Token::Semicolon(self.read_single_char_token()),
-            '%' => self.try_parse_number_with_prefix(|c| c.is_digit(2)),
-            '&' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_digit(8)),
-            '$' => self.try_parse_number_with_prefix(|c| c.is_hex_digit()),
-            '\'' => self.parse_quote_or_word(),
-            '0' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_hex_digit()),
-            '0'..='9' => {
-                let ident = self.read_number();
-                Token::Number(ident)
-            }
-            '\\' => {
-                if self.peek_char().is_whitespace() {
-                    let comment = self.read_comment_to('\n');
-                    Token::Comment(comment)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '(' => {
-                if self.peek_char().is_whitespace() {
+            '0'..='9' | '-' | '$' | '#' | '&' | '%' => self.parse_number(),
+            '\'' => self.parse_quote(),
+            ':' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Colon(self.read_ident()),
+                _ => Token::Word(self.read_ident()),
+            },
+            ';' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Semicolon(self.read_ident()),
+                _ => Token::Word(self.read_ident()),
+            },
+            '\\' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Comment(self.read_comment_to('\n')),
+                _ => Token::Word(self.read_ident()),
+            },
+            '(' => match self.peek_char() {
+                c if is_whitespace(c) => {
                     let comment = self.read_comment_to(')');
                     // Stack comments contain '--' to denote stack effects
                     if comment.value.contains("--") {
@@ -75,21 +75,15 @@ impl<'a> Lexer<'a> {
                     } else {
                         Token::Comment(comment)
                     }
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
                 }
-            }
+                _ => Token::Word(self.read_ident()),
+            },
             '\0' => {
                 let mut dat = self.here();
                 dat.value = "\0";
-                self.read_char();
                 Token::Eof(dat)
             }
-            _ => {
-                let ident = self.read_ident();
-                Token::Word(ident)
-            }
+            _ => Token::Word(self.read_ident()),
         };
 
         Ok(tok)
@@ -107,50 +101,69 @@ impl<'a> Lexer<'a> {
         self.read_position += 1;
     }
 
-    fn try_parse_number_with_prefix(&mut self, validator: fn(char) -> bool) -> Token<'a> {
-        if validator(self.peek_char()) {
-            Token::Number(self.read_number())
+    fn parse_number(&mut self) -> Token<'a> {
+        let mut sign_seen = false;
+
+        if self.ch == '-' {
+            self.read_char();
+            sign_seen = true;
+        }
+
+        let (prefix_len, radix) = match self.ch {
+            '$' => (1, 16),
+            '&' => (1, 8),
+            '%' => (1, 2),
+            '0' => match self.peek_char() {
+                'x' | 'X' => (2, 16),
+                _ => (0, 10),
+            },
+            // TODO: What about BASE?
+            _ => (0, 10),
+        };
+
+        for _ in 0..prefix_len {
+            self.read_char();
+        }
+
+        if !sign_seen && self.ch == '-' {
+            self.read_char();
+        }
+
+        // Prefix followed by whitespace is Word
+        if is_whitespace(self.ch) {
+            return Token::Word(self.current_token_data());
+        }
+
+        while self.ch.is_digit(radix) {
+            self.read_char();
+        }
+
+        // Digits followed by whitespace is Number
+        if is_whitespace(self.ch) {
+            Token::Number(self.current_token_data())
         } else {
-            Token::Word(self.read_ident())
+            // Digits followed by neither whitespace or digit is Word
+            self.read_ident();
+            Token::Word(self.current_token_data())
         }
     }
 
-    fn parse_quote_or_word(&mut self) -> Token<'a> {
-        let begin = self.position;
-        let next = self.peek_char();
-
-        if next.is_whitespace() {
+    fn parse_quote(&mut self) -> Token<'a> {
+        // ASSUMPTION: self.ch == '\''
+        if is_whitespace(self.peek_char()) {
             return Token::Word(self.read_ident());
         }
 
-        self.read_char(); // consume character after quote
+        self.read_char(); // Read character after '\''
+        self.read_char(); // and next character
 
-        if self.peek_char() == '\'' {
-            // Character literal like 'A'
-            self.read_char(); // consume closing quote
-            let number = Data {
-                start: begin,
-                end: self.position + 1,
-                value: &self.raw[begin..(self.position + 1)],
-            };
-            self.read_char(); // move past
-            return Token::Number(number);
-        }
-
-        // Quoted word
-        let mut word = self.read_ident();
-        word.start = begin;
-        word.value = &self.raw[begin..word.end];
-        Token::Word(word)
-    }
-
-    fn read_single_char_token(&mut self) -> Data<'a> {
-        let start = self.position;
-        self.read_char();
-        Data {
-            start,
-            end: start + 1,
-            value: &self.raw[start..start + 1],
+        if self.ch == '\'' && is_whitespace(self.peek_char()) {
+            self.read_char();
+            let data = self.current_token_data();
+            Token::Number(data)
+        } else {
+            let ident = self.read_ident();
+            Token::Word(ident)
         }
     }
 
@@ -162,13 +175,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.ch.is_ascii_whitespace() {
+        while is_whitespace(self.ch) && self.ch != '\0' {
             self.read_char();
         }
     }
 
     fn read_comment_to(&mut self, to: char) -> Data<'a> {
-        let start = self.position;
         while self.ch != to && self.ch != '\0' {
             self.read_char();
         }
@@ -176,45 +188,14 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
 
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
+        self.current_token_data()
     }
 
     fn read_ident(&mut self) -> Data<'a> {
-        let start = self.position;
-        while !self.ch.is_whitespace() && self.ch != '\0' {
+        while !is_whitespace(self.ch) {
             self.read_char();
         }
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
-    }
-
-    fn read_number(&mut self) -> Data<'a> {
-        let start = self.position;
-        //TODO: parse legal forth numbers
-        while self.ch.is_hex_digit()
-            || self.ch == '_'
-            || self.ch == '&'
-            || self.ch == '%'
-            || self.ch == 'x'
-            || self.ch == '$'
-        {
-            self.read_char();
-        }
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
+        self.current_token_data()
     }
 
     pub fn parse(&mut self) -> Vec<Token<'a>> {
@@ -226,12 +207,16 @@ impl<'a> Lexer<'a> {
                     break;
                 }
                 _ => {
-                    tokens.push(tok.clone());
+                    tokens.push(tok);
                 }
             }
         }
         tokens
     }
+}
+
+fn is_whitespace(c: char) -> bool {
+    c.is_whitespace() || c.is_ascii_control()
 }
 
 #[cfg(test)]
@@ -296,6 +281,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_word_minus() {
+        let mut lexer = Lexer::new("-");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 1, "-"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_word_dollar_minus() {
+        let mut lexer = Lexer::new("$-");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 2, "$-"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_word_dollar() {
+        let mut lexer = Lexer::new("$");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 1, "$"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_word_neg_neg_one() {
+        let mut lexer = Lexer::new("--1");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 3, "--1"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
     fn test_parse_number_literal() {
         let mut lexer = Lexer::new("12");
         let tokens = lexer.parse();
@@ -312,6 +329,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_negative_number_literal() {
+        let mut lexer = Lexer::new("-12");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 3, "-12"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_negative_number_literal_zero() {
+        let mut lexer = Lexer::new("-01");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 3, "-01"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_negative_number_oct() {
+        let mut lexer = Lexer::new("&-7");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 3, "&-7"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_negative_number_bin() {
+        let mut lexer = Lexer::new("-%11");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 4, "-%11"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
     fn test_parse_number_bin() {
         let mut lexer = Lexer::new("%0100101");
         let tokens = lexer.parse();
@@ -320,14 +369,27 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_parse_number_bin_only_valid() {
-        //TODO: but ill formed will also parse
-        //      %12345 is not a binary number
         let mut lexer = Lexer::new("%12345");
         let tokens = lexer.parse();
         let expected = vec![Word(Data::new(0, 6, "%12345"))];
         assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_parse_number_only_valid() {
+        let mut lexer = Lexer::new("2dup");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 4, "2dup"))];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_parse_number_hex_only_valid() {
+        let mut lexer = Lexer::new("$cafefun");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 8, "$cafefun"))];
+        assert_eq!(tokens, expected)
     }
 
     #[test]
@@ -347,10 +409,42 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_negative_number_before_0xhex() {
+        let mut lexer = Lexer::new("-0xFE");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 5, "-0xFE"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_negative_number_after_0hex() {
+        let mut lexer = Lexer::new("0x-FE");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 5, "0x-FE"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_minus_only_valid() {
+        let mut lexer = Lexer::new("-0x-A-");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 6, "-0x-A-"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
     fn test_parse_number_char() {
         let mut lexer = Lexer::new("'c'");
         let tokens = lexer.parse();
         let expected = vec![Number(Data::new(0, 3, "'c'"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_number_char_only_valid() {
+        let mut lexer = Lexer::new("' '");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 1, "'")), Word(Data::new(2, 3, "'"))];
         assert_eq!(tokens, expected)
     }
 
