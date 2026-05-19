@@ -292,193 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_number_underscore() {
-        let mut lexer = Lexer::new("10_000");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 6, "10_000"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_underscore_only_valid() {
-        let mut lexer = Lexer::new("_$10_000");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 8, "_$10_000"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_double_cell() {
-        let mut lexer = Lexer::new("12.34");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 5, "12.34"))];
-        assert_eq!(tokens, expected)
-    }
-    #[test]
-    fn test_parse_number_double_cell_only_valid() {
-        let mut lexer = Lexer::new("12.3.4");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 6, "12.3.4"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
     fn test_word_multi_byte_utf8() {
         let mut lexer = Lexer::new("👻");
         let tokens = lexer.parse();
         let expected = vec![Word(Data::new(0, 4, "👻"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_word_minus() {
-        let mut lexer = Lexer::new("-");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 1, "-"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_word_dollar_minus() {
-        let mut lexer = Lexer::new("$-");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 2, "$-"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_word_dollar() {
-        let mut lexer = Lexer::new("$");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 1, "$"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_word_neg_neg_one() {
-        let mut lexer = Lexer::new("--1");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 3, "--1"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_literal() {
-        let mut lexer = Lexer::new("12");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 2, "12"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_oct() {
-        let mut lexer = Lexer::new("&12");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 3, "&12"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_literal() {
-        let mut lexer = Lexer::new("-12");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 3, "-12"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_literal_zero() {
-        let mut lexer = Lexer::new("-01");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 3, "-01"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_oct() {
-        let mut lexer = Lexer::new("&-7");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 3, "&-7"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_bin() {
-        let mut lexer = Lexer::new("-%11");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 4, "-%11"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_bin() {
-        let mut lexer = Lexer::new("%0100101");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 8, "%0100101"))];
-        assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    fn test_parse_number_bin_only_valid() {
-        let mut lexer = Lexer::new("%12345");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 6, "%12345"))];
-        assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    fn test_parse_number_only_valid() {
-        let mut lexer = Lexer::new("2dup");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 4, "2dup"))];
-        assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    fn test_parse_number_hex_only_valid() {
-        let mut lexer = Lexer::new("$cafefun");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 8, "$cafefun"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_hex() {
-        let mut lexer = Lexer::new("$FfAaDd");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 7, "$FfAaDd"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_0xhex() {
-        let mut lexer = Lexer::new("0xFE");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 4, "0xFE"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_before_0xhex() {
-        let mut lexer = Lexer::new("-0xFE");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 5, "-0xFE"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_negative_number_after_0hex() {
-        let mut lexer = Lexer::new("0x-FE");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 5, "0x-FE"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_minus_only_valid() {
-        let mut lexer = Lexer::new("-0x-A-");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 6, "-0x-A-"))];
         assert_eq!(tokens, expected)
     }
 
@@ -534,14 +351,6 @@ mod tests {
         assert_eq!(tokens, expected)
     }
 
-    #[test]
-    fn test_parse_number_word() {
-        let mut lexer = Lexer::new("word");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 4, "word"))];
-        assert_eq!(tokens, expected)
-    }
-
     #[cfg(feature = "ropey")]
     #[test]
     fn test_to_ropey() {
@@ -557,5 +366,134 @@ mod tests {
         let x = rope.slice(&word2);
         assert_eq!("word2", word2.value);
         assert_eq!(word2.value, x);
+    }
+
+    const PREFIXES: [&'static str; 6] = ["$", "#", "&", "%", "0x", ""];
+
+    const DIGITS: [&'static str; 6] = [
+        "0123456789abcdef",
+        "012345789",
+        "012345679",
+        "01",
+        "0123456789ABCDEF",
+        "012345689",
+    ];
+
+    const NON_DIGITS: [&'static str; 6] = [
+        "0123456789abcdefg",
+        "012345789a",
+        "012345689a",
+        "012",
+        "0123456789ABCDEFG",
+        "012345689a",
+    ];
+
+    fn should_parse_number(s: String) {
+        let mut lexer = Lexer::new(&s);
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, s.len(), &s))];
+        assert_eq!(tokens, expected);
+    }
+
+    fn should_parse_word(s: String) {
+        let mut lexer = Lexer::new(&s);
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, s.len(), &s))];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_parse_numbers() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            should_parse_number(format!("{prefix}{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_sign() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Sign in prefix
+            should_parse_number(format!("-{prefix}{digits}"));
+            should_parse_number(format!("{prefix}-{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_underscore() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Underscore after prefix
+            should_parse_number(format!("{prefix}_{digits}_{digits}"));
+            should_parse_number(format!("{prefix}_")); // Zero
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_decimal_point() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Decimal point after prefix
+            should_parse_number(format!("{prefix}.{digits}"));
+            should_parse_number(format!("{prefix}{digits}."));
+            should_parse_number(format!("{prefix}{digits}.{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_only_valid() {
+        for (prefix, bad_digits) in PREFIXES.iter().zip(NON_DIGITS.iter()) {
+            // Non-digits
+            should_parse_word(format!("{prefix}{bad_digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_prefix_only_valid() {
+        for prefix in PREFIXES {
+            // Prefix without digits
+            if !prefix.is_empty() {
+                should_parse_word(format!("{prefix}"));
+            }
+            should_parse_word(format!("{prefix}-"));
+            should_parse_word(format!("-{prefix}"));
+            should_parse_word(format!("{prefix}-"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_sign_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Too many signs
+            should_parse_word(format!("--{prefix}{digits}"));
+            should_parse_word(format!("-{prefix}-{digits}"));
+            should_parse_word(format!("{prefix}-{digits}-{digits}"));
+            should_parse_word(format!("{prefix}--{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_underscore_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Underscore in prefix
+            if !prefix.is_empty() {
+                should_parse_word(format!("_{prefix}{digits}"));
+                should_parse_word(format!("{prefix}_-{digits}"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_decimal_point_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Decimal point before prefix
+            if !prefix.is_empty() {
+                should_parse_word(format!(".{prefix}{digits}"));
+            }
+
+            // Too many decimal points
+            should_parse_word(format!("{prefix}{digits}.{digits}.{digits}"));
+            should_parse_word(format!("{prefix}.{digits}.{digits}"));
+
+            // Decimal point without digits
+            should_parse_word(format!("{prefix}."));
+        }
     }
 }
