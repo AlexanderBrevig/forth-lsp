@@ -103,23 +103,29 @@ impl<'a> Lexer<'a> {
         self.read_position += self.ch.len();
     }
 
+    fn read_digits(&mut self, radix: u32) {
+        while self.ch.is_digit(radix) || self.ch == '_' {
+            self.read_char();
+        }
+    }
+
     fn parse_number(&mut self) -> Token<'a> {
-        let mut sign_seen = false;
+        let mut accept_sign = true;
 
         if self.ch == '-' {
             self.read_char();
-            sign_seen = true;
+            accept_sign = false;
         }
 
         let (prefix_len, radix) = match self.ch {
             '$' => (1, 16),
-            '&' => (1, 8),
             '%' => (1, 2),
+            '#' => (1, 10),
+            '&' => (1, 10),
             '0' => match self.peek_char() {
                 'x' | 'X' => (2, 16),
                 _ => (0, 10),
             },
-            // TODO: What about BASE?
             _ => (0, 10),
         };
 
@@ -127,7 +133,7 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
 
-        if !sign_seen && self.ch == '-' {
+        if accept_sign && self.ch == '-' {
             self.read_char();
         }
 
@@ -136,8 +142,11 @@ impl<'a> Lexer<'a> {
             return Token::Word(self.current_token_data());
         }
 
-        while self.ch.is_digit(radix) {
+        self.read_digits(radix);
+
+        if self.ch == '.' {
             self.read_char();
+            self.read_digits(radix);
         }
 
         // Digits followed by whitespace is Number
@@ -283,7 +292,38 @@ mod tests {
     }
 
     #[test]
-    fn test_word_ut8() {
+    fn test_parse_number_underscore() {
+        let mut lexer = Lexer::new("10_000");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 6, "10_000"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_number_underscore_only_valid() {
+        let mut lexer = Lexer::new("_$10_000");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 8, "_$10_000"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_number_double_cell() {
+        let mut lexer = Lexer::new("12.34");
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, 5, "12.34"))];
+        assert_eq!(tokens, expected)
+    }
+    #[test]
+    fn test_parse_number_double_cell_only_valid() {
+        let mut lexer = Lexer::new("12.3.4");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 6, "12.3.4"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_word_multi_byte_utf8() {
         let mut lexer = Lexer::new("👻");
         let tokens = lexer.parse();
         let expected = vec![Word(Data::new(0, 4, "👻"))];
