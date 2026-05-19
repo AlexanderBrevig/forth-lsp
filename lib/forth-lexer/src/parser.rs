@@ -54,7 +54,7 @@ impl<'a> Lexer<'a> {
         self.token_start = self.position;
 
         let tok = match self.ch {
-            '0'..='9' | '-' | '$' | '#' | '&' | '%' => self.parse_number(),
+            '0'..='9' | '-' | '$' | '#' | '&' | '%' | '_' | '.' => self.parse_number(),
             '\'' => self.parse_quote(),
             ':' => match self.peek_char() {
                 c if is_whitespace(c) => Token::Colon(self.read_ident()),
@@ -103,10 +103,13 @@ impl<'a> Lexer<'a> {
         self.read_position += self.ch.len();
     }
 
-    fn read_digits(&mut self, radix: u32) {
+    fn read_digits(&mut self, radix: u32) -> usize {
+        let mut count = 0;
         while self.ch.is_digit(radix) || self.ch == '_' {
             self.read_char();
+            count += 1;
         }
+        count
     }
 
     fn parse_number(&mut self) -> Token<'a> {
@@ -137,23 +140,17 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
 
-        // Prefix followed by whitespace is Word
-        if is_whitespace(self.ch) {
-            return Token::Word(self.current_token_data());
-        }
-
-        self.read_digits(radix);
+        let mut digit_count = self.read_digits(radix);
 
         if self.ch == '.' {
             self.read_char();
-            self.read_digits(radix);
+            digit_count += self.read_digits(radix);
         }
 
         // Digits followed by whitespace is Number
-        if is_whitespace(self.ch) {
+        if digit_count > 0 && is_whitespace(self.ch) {
             Token::Number(self.current_token_data())
         } else {
-            // Digits followed by neither whitespace or digit is Word
             self.read_ident();
             Token::Word(self.current_token_data())
         }
