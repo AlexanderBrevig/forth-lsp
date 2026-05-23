@@ -4,8 +4,7 @@ use forth_lexer::token::Token;
 
 /// Extract a word name from a token sequence starting at the given index.
 ///
-/// Handles three cases:
-/// - Number followed by Word with no gap = combined name (e.g., 2SWAP)
+/// Handles two cases:
 /// - Single Word token
 /// - Single Number token (valid Forth word name)
 ///
@@ -16,17 +15,11 @@ pub fn extract_word_name(tokens: &[Token], index: usize) -> Option<String> {
         return None;
     }
 
-    match (&tokens[index], tokens.get(index + 1)) {
-        // Number followed by Word with no gap = combined name (e.g., 2SWAP)
-        (Token::Number(num_data), Some(Token::Word(word_data)))
-            if num_data.end == word_data.start =>
-        {
-            Some(format!("{}{}", num_data.value, word_data.value))
-        }
+    match &tokens[index] {
         // Just a Word
-        (Token::Word(data), _) => Some(data.value.to_string()),
+        Token::Word(data) => Some(data.value.to_string()),
         // Just a Number (valid Forth word name)
-        (Token::Number(data), _) => Some(data.value.to_string()),
+        Token::Number(data) => Some(data.value.to_string()),
         _ => None,
     }
 }
@@ -43,21 +36,11 @@ pub fn extract_word_name_with_range(
         return None;
     }
 
-    match (&tokens[index], tokens.get(index + 1)) {
-        // Number followed by Word with no gap = combined name (e.g., 2SWAP)
-        (Token::Number(num_data), Some(Token::Word(word_data)))
-            if num_data.end == word_data.start =>
-        {
-            Some((
-                format!("{}{}", num_data.value, word_data.value),
-                num_data.start,
-                word_data.end,
-            ))
-        }
+    match &tokens[index] {
         // Just a Word
-        (Token::Word(data), _) => Some((data.value.to_string(), data.start, data.end)),
+        Token::Word(data) => Some((data.value.to_string(), data.start, data.end)),
         // Just a Number (valid Forth word name)
-        (Token::Number(data), _) => Some((data.value.to_string(), data.start, data.end)),
+        Token::Number(data) => Some((data.value.to_string(), data.start, data.end)),
         _ => None,
     }
 }
