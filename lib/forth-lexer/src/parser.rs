@@ -9,6 +9,7 @@ pub enum LexError {}
 pub struct Lexer<'a> {
     position: usize,
     read_position: usize,
+    token_start: usize,
     ch: char,
     raw: &'a str,
     input: Peekable<Chars<'a>>,
@@ -19,6 +20,7 @@ impl<'a> Lexer<'a> {
         let mut lex = Lexer {
             position: 0,
             read_position: 0,
+            token_start: 0,
             ch: '0',
             input: input.chars().peekable(),
             raw: input,
@@ -26,12 +28,6 @@ impl<'a> Lexer<'a> {
         lex.read_char();
 
         lex
-    }
-
-    pub fn reset(&mut self) {
-        self.position = 0;
-        self.read_position = 0;
-        self.ch = '\0';
     }
 
     pub fn here(&self) -> Data<'a> {
@@ -42,32 +38,38 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn current_token_data(&self) -> Data<'a> {
+        let start = self.token_start;
+        let end = self.position.min(self.raw.len());
+        Data {
+            start,
+            end,
+            value: &self.raw[start..end],
+        }
+    }
+
     pub fn next_token(&mut self) -> Result<Token<'a>, LexError> {
         self.skip_whitespace();
 
+        self.token_start = self.position;
+
         let tok = match self.ch {
-            ':' => Token::Colon(self.read_single_char_token()),
-            ';' => Token::Semicolon(self.read_single_char_token()),
-            '%' => self.try_parse_number_with_prefix(|c| c.is_digit(2)),
-            '&' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_digit(8)),
-            '$' => self.try_parse_number_with_prefix(|c| c.is_hex_digit()),
-            '\'' => self.parse_quote_or_word(),
-            '0' => self.try_parse_number_with_prefix(|c| c == 'x' || c.is_hex_digit()),
-            '0'..='9' => {
-                let ident = self.read_number();
-                Token::Number(ident)
-            }
-            '\\' => {
-                if self.peek_char().is_whitespace() {
-                    let comment = self.read_comment_to('\n');
-                    Token::Comment(comment)
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
-                }
-            }
-            '(' => {
-                if self.peek_char().is_whitespace() {
+            '0'..='9' | '-' | '$' | '#' | '&' | '%' | '_' | '.' => self.parse_number(),
+            '\'' => self.parse_quote(),
+            ':' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Colon(self.read_ident()),
+                _ => Token::Word(self.read_ident()),
+            },
+            ';' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Semicolon(self.read_ident()),
+                _ => Token::Word(self.read_ident()),
+            },
+            '\\' => match self.peek_char() {
+                c if is_whitespace(c) => Token::Comment(self.read_comment_to('\n')),
+                _ => Token::Word(self.read_ident()),
+            },
+            '(' => match self.peek_char() {
+                c if is_whitespace(c) => {
                     let comment = self.read_comment_to(')');
                     // Stack comments contain '--' to denote stack effects
                     if comment.value.contains("--") {
@@ -75,21 +77,15 @@ impl<'a> Lexer<'a> {
                     } else {
                         Token::Comment(comment)
                     }
-                } else {
-                    let ident = self.read_ident();
-                    Token::Word(ident)
                 }
-            }
+                _ => Token::Word(self.read_ident()),
+            },
             '\0' => {
                 let mut dat = self.here();
                 dat.value = "\0";
-                self.read_char();
                 Token::Eof(dat)
             }
-            _ => {
-                let ident = self.read_ident();
-                Token::Word(ident)
-            }
+            _ => Token::Word(self.read_ident()),
         };
 
         Ok(tok)
@@ -104,53 +100,78 @@ impl<'a> Lexer<'a> {
         self.input.next();
 
         self.position = self.read_position;
-        self.read_position += 1;
+        self.read_position += self.ch.len();
     }
 
-    fn try_parse_number_with_prefix(&mut self, validator: fn(char) -> bool) -> Token<'a> {
-        if validator(self.peek_char()) {
-            Token::Number(self.read_number())
+    fn read_digits(&mut self, radix: u32) -> usize {
+        let mut count = 0;
+        while self.ch.is_digit(radix) || self.ch == '_' {
+            self.read_char();
+            count += 1;
+        }
+        count
+    }
+
+    fn parse_number(&mut self) -> Token<'a> {
+        let mut accept_sign = true;
+
+        if self.ch == '-' {
+            self.read_char();
+            accept_sign = false;
+        }
+
+        let (prefix_len, radix) = match self.ch {
+            '$' => (1, 16),
+            '%' => (1, 2),
+            '#' => (1, 10),
+            '&' => (1, 10),
+            '0' => match self.peek_char() {
+                'x' | 'X' => (2, 16),
+                _ => (0, 10),
+            },
+            _ => (0, 10),
+        };
+
+        for _ in 0..prefix_len {
+            self.read_char();
+        }
+
+        if accept_sign && self.ch == '-' {
+            self.read_char();
+        }
+
+        let mut digit_count = self.read_digits(radix);
+
+        if self.ch == '.' {
+            self.read_char();
+            digit_count += self.read_digits(radix);
+        }
+
+        // Digits followed by whitespace is Number
+        if digit_count > 0 && is_whitespace(self.ch) {
+            Token::Number(self.current_token_data())
         } else {
-            Token::Word(self.read_ident())
+            self.read_ident();
+            Token::Word(self.current_token_data())
         }
     }
 
-    fn parse_quote_or_word(&mut self) -> Token<'a> {
-        let begin = self.position;
-        let next = self.peek_char();
-
-        if next.is_whitespace() {
+    fn parse_quote(&mut self) -> Token<'a> {
+        // ASSUMPTION: self.ch == '\''
+        if is_whitespace(self.peek_char()) {
             return Token::Word(self.read_ident());
         }
 
-        self.read_char(); // consume character after quote
+        self.read_char(); // Read character after '\''
+        self.read_char(); // and next character
 
-        if self.peek_char() == '\'' {
-            // Character literal like 'A'
-            self.read_char(); // consume closing quote
-            let number = Data {
-                start: begin,
-                end: self.position + 1,
-                value: &self.raw[begin..(self.position + 1)],
-            };
-            self.read_char(); // move past
-            return Token::Number(number);
-        }
-
-        // Quoted word
-        let mut word = self.read_ident();
-        word.start = begin;
-        word.value = &self.raw[begin..word.end];
-        Token::Word(word)
-    }
-
-    fn read_single_char_token(&mut self) -> Data<'a> {
-        let start = self.position;
-        self.read_char();
-        Data {
-            start,
-            end: start + 1,
-            value: &self.raw[start..start + 1],
+        if self.ch == '\'' && is_whitespace(self.peek_char()) {
+            self.read_char();
+            let data = self.current_token_data();
+            Token::Number(data)
+        } else {
+            let ident = self.read_ident();
+            Token::Word(ident)
         }
     }
 
@@ -162,13 +183,12 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while self.ch.is_ascii_whitespace() {
+        while is_whitespace(self.ch) && self.ch != '\0' {
             self.read_char();
         }
     }
 
     fn read_comment_to(&mut self, to: char) -> Data<'a> {
-        let start = self.position;
         while self.ch != to && self.ch != '\0' {
             self.read_char();
         }
@@ -176,45 +196,14 @@ impl<'a> Lexer<'a> {
             self.read_char();
         }
 
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
+        self.current_token_data()
     }
 
     fn read_ident(&mut self) -> Data<'a> {
-        let start = self.position;
-        while !self.ch.is_whitespace() && self.ch != '\0' {
+        while !is_whitespace(self.ch) {
             self.read_char();
         }
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
-    }
-
-    fn read_number(&mut self) -> Data<'a> {
-        let start = self.position;
-        //TODO: parse legal forth numbers
-        while self.ch.is_hex_digit()
-            || self.ch == '_'
-            || self.ch == '&'
-            || self.ch == '%'
-            || self.ch == 'x'
-            || self.ch == '$'
-        {
-            self.read_char();
-        }
-        let end = self.position.min(self.raw.len());
-        Data {
-            start,
-            end,
-            value: &self.raw[start..end],
-        }
+        self.current_token_data()
     }
 
     pub fn parse(&mut self) -> Vec<Token<'a>> {
@@ -226,12 +215,16 @@ impl<'a> Lexer<'a> {
                     break;
                 }
                 _ => {
-                    tokens.push(tok.clone());
+                    tokens.push(tok);
                 }
             }
         }
         tokens
     }
+}
+
+fn is_whitespace(c: char) -> bool {
+    c.is_whitespace() || c.is_ascii_control()
 }
 
 #[cfg(test)]
@@ -296,53 +289,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_number_literal() {
-        let mut lexer = Lexer::new("12");
+    fn test_word_multi_byte_utf8() {
+        let mut lexer = Lexer::new("👻");
         let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 2, "12"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_oct() {
-        let mut lexer = Lexer::new("&12");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 3, "&12"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_bin() {
-        let mut lexer = Lexer::new("%0100101");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 8, "%0100101"))];
-        assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    #[ignore]
-    fn test_parse_number_bin_only_valid() {
-        //TODO: but ill formed will also parse
-        //      %12345 is not a binary number
-        let mut lexer = Lexer::new("%12345");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 6, "%12345"))];
-        assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    fn test_parse_number_hex() {
-        let mut lexer = Lexer::new("$FfAaDd");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 7, "$FfAaDd"))];
-        assert_eq!(tokens, expected)
-    }
-
-    #[test]
-    fn test_parse_number_0xhex() {
-        let mut lexer = Lexer::new("0xFE");
-        let tokens = lexer.parse();
-        let expected = vec![Number(Data::new(0, 4, "0xFE"))];
+        let expected = vec![Word(Data::new(0, 4, "👻"))];
         assert_eq!(tokens, expected)
     }
 
@@ -351,6 +301,14 @@ mod tests {
         let mut lexer = Lexer::new("'c'");
         let tokens = lexer.parse();
         let expected = vec![Number(Data::new(0, 3, "'c'"))];
+        assert_eq!(tokens, expected)
+    }
+
+    #[test]
+    fn test_parse_number_char_only_valid() {
+        let mut lexer = Lexer::new("' '");
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, 1, "'")), Word(Data::new(2, 3, "'"))];
         assert_eq!(tokens, expected)
     }
 
@@ -390,14 +348,6 @@ mod tests {
         assert_eq!(tokens, expected)
     }
 
-    #[test]
-    fn test_parse_number_word() {
-        let mut lexer = Lexer::new("word");
-        let tokens = lexer.parse();
-        let expected = vec![Word(Data::new(0, 4, "word"))];
-        assert_eq!(tokens, expected)
-    }
-
     #[cfg(feature = "ropey")]
     #[test]
     fn test_to_ropey() {
@@ -413,5 +363,134 @@ mod tests {
         let x = rope.slice(&word2);
         assert_eq!("word2", word2.value);
         assert_eq!(word2.value, x);
+    }
+
+    const PREFIXES: [&'static str; 6] = ["$", "#", "&", "%", "0x", ""];
+
+    const DIGITS: [&'static str; 6] = [
+        "0123456789abcdef",
+        "012345789",
+        "012345679",
+        "01",
+        "0123456789ABCDEF",
+        "012345689",
+    ];
+
+    const NON_DIGITS: [&'static str; 6] = [
+        "0123456789abcdefg",
+        "012345789a",
+        "012345689a",
+        "012",
+        "0123456789ABCDEFG",
+        "012345689a",
+    ];
+
+    fn should_parse_number(s: String) {
+        let mut lexer = Lexer::new(&s);
+        let tokens = lexer.parse();
+        let expected = vec![Number(Data::new(0, s.len(), &s))];
+        assert_eq!(tokens, expected);
+    }
+
+    fn should_parse_word(s: String) {
+        let mut lexer = Lexer::new(&s);
+        let tokens = lexer.parse();
+        let expected = vec![Word(Data::new(0, s.len(), &s))];
+        assert_eq!(tokens, expected);
+    }
+
+    #[test]
+    fn test_parse_numbers() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            should_parse_number(format!("{prefix}{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_sign() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Sign in prefix
+            should_parse_number(format!("-{prefix}{digits}"));
+            should_parse_number(format!("{prefix}-{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_underscore() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Underscore after prefix
+            should_parse_number(format!("{prefix}_{digits}_{digits}"));
+            should_parse_number(format!("{prefix}_")); // Zero
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_decimal_point() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Decimal point after prefix
+            should_parse_number(format!("{prefix}.{digits}"));
+            should_parse_number(format!("{prefix}{digits}."));
+            should_parse_number(format!("{prefix}{digits}.{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_only_valid() {
+        for (prefix, bad_digits) in PREFIXES.iter().zip(NON_DIGITS.iter()) {
+            // Non-digits
+            should_parse_word(format!("{prefix}{bad_digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_prefix_only_valid() {
+        for prefix in PREFIXES {
+            // Prefix without digits
+            if !prefix.is_empty() {
+                should_parse_word(format!("{prefix}"));
+            }
+            should_parse_word(format!("{prefix}-"));
+            should_parse_word(format!("-{prefix}"));
+            should_parse_word(format!("{prefix}-"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_sign_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Too many signs
+            should_parse_word(format!("--{prefix}{digits}"));
+            should_parse_word(format!("-{prefix}-{digits}"));
+            should_parse_word(format!("{prefix}-{digits}-{digits}"));
+            should_parse_word(format!("{prefix}--{digits}"));
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_underscore_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Underscore in prefix
+            if !prefix.is_empty() {
+                should_parse_word(format!("_{prefix}{digits}"));
+                should_parse_word(format!("{prefix}_-{digits}"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_numbers_decimal_point_only_valid() {
+        for (prefix, digits) in PREFIXES.iter().zip(DIGITS.iter()) {
+            // Decimal point before prefix
+            if !prefix.is_empty() {
+                should_parse_word(format!(".{prefix}{digits}"));
+            }
+
+            // Too many decimal points
+            should_parse_word(format!("{prefix}{digits}.{digits}.{digits}"));
+            should_parse_word(format!("{prefix}.{digits}.{digits}"));
+
+            // Decimal point without digits
+            should_parse_word(format!("{prefix}."));
+        }
     }
 }

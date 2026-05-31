@@ -114,34 +114,8 @@ pub fn get_semantic_tokens(rope: &Rope, builtin_words: &Words) -> SemanticTokens
             Token::Semicolon(_) => (TOKEN_TYPE_KEYWORD, 0u32, false),
             Token::Comment(_) => (TOKEN_TYPE_COMMENT, 0u32, false),
             Token::StackComment(_) => (TOKEN_TYPE_STRING, 0u32, false),
-            Token::Number(num_data) => {
+            Token::Number(_num_data) => {
                 if after_colon {
-                    // Check if this number is part of a combined name like "2swap"
-                    if let Some(Token::Word(word_data)) = tokens.get(i + 1)
-                        && num_data.end == word_data.start
-                    {
-                        // Combined token: emit as single FUNCTION+DEFINITION
-                        let (line, start_char) = to_line_char(num_data.start, rope);
-                        let length = (word_data.end - num_data.start) as u32;
-                        let delta_line = line - prev_line;
-                        let delta_start = if delta_line == 0 {
-                            start_char - prev_start
-                        } else {
-                            start_char
-                        };
-                        semantic_tokens.push(SemanticToken {
-                            delta_line,
-                            delta_start,
-                            length,
-                            token_type: TOKEN_TYPE_FUNCTION,
-                            token_modifiers_bitset: MODIFIER_DEFINITION,
-                        });
-                        prev_line = line;
-                        prev_start = start_char;
-                        after_colon = false;
-                        i += 2; // skip both number and word
-                        continue;
-                    }
                     // Just a number as the definition name
                     after_colon = false;
                     (TOKEN_TYPE_FUNCTION, MODIFIER_DEFINITION, false)

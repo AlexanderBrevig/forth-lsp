@@ -56,15 +56,7 @@ impl DefinitionIndex {
             if result.len() >= 2 {
                 // Mark the word name token(s) as part of definition
                 if let Token::Number(num_data) = &result[1] {
-                    if let Some(Token::Word(word_data)) = result.get(2) {
-                        if num_data.end == word_data.start {
-                            // Combined name like "2SWAP" - mark both tokens
-                            definition_token_indices.insert(num_data.start);
-                            definition_token_indices.insert(word_data.start);
-                        }
-                    } else {
-                        definition_token_indices.insert(num_data.start);
-                    }
+                    definition_token_indices.insert(num_data.start);
                 } else if let Token::Word(data) = &result[1] {
                     definition_token_indices.insert(data.start);
                 }
@@ -142,18 +134,37 @@ impl DefinitionIndex {
 
         // Second pass: collect references (word usages)
         for token in tokens {
-            if let Token::Word(data) = token {
-                // Skip if this is a word name in a definition
-                if definition_token_indices.contains(&data.start) {
-                    continue;
+            match token {
+                Token::Word(data) => {
+                    if definition_token_indices.contains(&data.start) {
+                        continue;
+                    }
+
+                    let range = data.to_range(rope);
+
+                    self.references
+                        .entry(data.value.to_lowercase())
+                        .or_default()
+                        .push((file_path.to_string(), range));
                 }
+                Token::Number(data) => {
+                    if definition_token_indices.contains(&data.start) {
+                        continue;
+                    }
 
-                let range = data.to_range(rope);
+                    let name = data.value.to_lowercase();
 
-                self.references
-                    .entry(data.value.to_lowercase())
-                    .or_default()
-                    .push((file_path.to_string(), range));
+                    // Only add referene if first pass picked up number literal redefine
+                    if self.definitions.contains_key(&name) {
+                        let range = data.to_range(rope);
+
+                        self.references
+                            .entry(data.value.to_lowercase())
+                            .or_default()
+                            .push((file_path.to_string(), range));
+                    }
+                }
+                _ => {}
             }
         }
     }
