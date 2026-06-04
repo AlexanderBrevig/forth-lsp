@@ -32,4 +32,4 @@ path = "lib/forth-lexer"
 features = ["ropey"]
 
 [dev-dependencies]
-tempfile = "3.26.0"
+tempfile = "3.27.0"
