@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::utils::data_to_position::to_line_char;
 use crate::utils::definition_helpers::find_colon_definitions;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::words::Words;
@@ -117,13 +118,15 @@ pub fn check_undefined_words_from_tokens(
             }
 
             // Create diagnostic for undefined word
+            let (start_line, start_char) = to_line_char(data.start, rope);
+            let (end_line, end_char) = to_line_char(data.end, rope);
             let start_pos = Position {
-                line: rope.char_to_line(data.start) as u32,
-                character: (data.start - rope.line_to_char(rope.char_to_line(data.start))) as u32,
+                line: start_line,
+                character: start_char,
             };
             let end_pos = Position {
-                line: rope.char_to_line(data.end) as u32,
-                character: (data.end - rope.line_to_char(rope.char_to_line(data.end))) as u32,
+                line: end_line,
+                character: end_char,
             };
 
             diagnostics.push(Diagnostic {

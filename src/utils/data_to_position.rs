@@ -31,7 +31,8 @@ impl<'a> ToPosition for Data<'a> {
     }
 }
 
-pub fn to_line_char(chix: usize, rope: &ropey::Rope) -> (u32, u32) {
+pub fn to_line_char(byte_idx: usize, rope: &ropey::Rope) -> (u32, u32) {
+    let chix = rope.byte_to_char(byte_idx);
     let start_line = rope.char_to_line(chix) as u32;
     let start_char = (chix - rope.line_to_char(start_line as usize)) as u32;
     (start_line, start_char)
@@ -231,6 +232,25 @@ mod tests {
             Position {
                 line: 2,
                 character: 1
+            }
+        );
+    }
+
+    #[test]
+    fn test_to_position_with_multibyte_utf8() {
+        // The lexer emits BYTE offsets in Data; positions must still be in chars.
+        // Source: `\ è\n: x ;` — the `è` is 2 bytes / 1 char.
+        let src = "\\ è\n: x ;";
+        let rope = Rope::from_str(src);
+        // Byte offset of `x`: backslash(1)+space(1)+è(2)+nl(1)+colon(1)+space(1) = 7
+        let x_byte_start = src.find('x').unwrap();
+        let data = Data::new(x_byte_start, x_byte_start + 1, "x");
+        let pos = data.to_position_start(&rope);
+        assert_eq!(
+            pos,
+            Position {
+                line: 1,
+                character: 2
             }
         );
     }
