@@ -5,3 +5,9 @@ TODO.md
 test.forth
 fib.forth
 other.forth
+
+# Nix
+/result
+/result-*
+.direnv/
+.envrc
