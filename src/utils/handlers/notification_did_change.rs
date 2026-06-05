@@ -39,10 +39,17 @@ pub fn handle_did_change_text_document(
                 );
                 if let Some(range) = change.range {
                     // Incremental change - update specific range
-                    let start = rope.line_to_char(range.start.line as usize)
+                    let start_line = range.start.line as usize;
+                    let end_line = range.end.line as usize;
+                    if start_line >= rope.len_lines() || end_line >= rope.len_lines() {
+                        // Out-of-bounds range, fall back to full document sync
+                        *rope = Rope::from_str(change.text.as_str());
+                        continue;
+                    }
+                    let start = rope.line_to_char(start_line)
                         + range.start.character as usize;
                     let end =
-                        rope.line_to_char(range.end.line as usize) + range.end.character as usize;
+                        rope.line_to_char(end_line) + range.end.character as usize;
                     rope.remove(start..end);
                     rope.insert(start, change.text.as_str());
                 } else {

@@ -7,21 +7,32 @@ pub trait GetIx<T> {
 
 impl GetIx<CompletionParams> for Rope {
     fn get_ix(&self, params: &CompletionParams) -> usize {
-        self.line_to_char(params.text_document_position.position.line as usize)
-            + params.text_document_position.position.character as usize
+        let line = params.text_document_position.position.line as usize;
+        if line >= self.len_lines() {
+            return self.len_chars();
+        }
+        self.line_to_char(line) + params.text_document_position.position.character as usize
     }
 }
 
 impl GetIx<HoverParams> for Rope {
     fn get_ix(&self, params: &HoverParams) -> usize {
-        self.line_to_char(params.text_document_position_params.position.line as usize)
+        let line = params.text_document_position_params.position.line as usize;
+        if line >= self.len_lines() {
+            return self.len_chars();
+        }
+        self.line_to_char(line)
             + params.text_document_position_params.position.character as usize
     }
 }
 
 impl GetIx<GotoTypeDefinitionParams> for Rope {
     fn get_ix(&self, params: &GotoTypeDefinitionParams) -> usize {
-        self.line_to_char(params.text_document_position_params.position.line as usize)
+        let line = params.text_document_position_params.position.line as usize;
+        if line >= self.len_lines() {
+            return self.len_chars();
+        }
+        self.line_to_char(line)
             + params.text_document_position_params.position.character as usize
     }
 }
@@ -111,5 +122,78 @@ mod tests {
         // line 1: "  1 2 3\n" = 8 chars (total 15)
         // line 2: ";" starts at char 15
         assert_eq!(rope.get_ix(&params), 15);
+    }
+
+    fn make_hover(line: u32, character: u32) -> HoverParams {
+        HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: "file:///test.forth".parse().unwrap(),
+                },
+                position: Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+        }
+    }
+
+    fn make_completion(line: u32, character: u32) -> CompletionParams {
+        CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: "file:///test.forth".parse().unwrap(),
+                },
+                position: Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        }
+    }
+
+    fn make_goto(line: u32, character: u32) -> GotoTypeDefinitionParams {
+        GotoTypeDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: "file:///test.forth".parse().unwrap(),
+                },
+                position: Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_get_ix_hover_line_out_of_bounds() {
+        let rope = Rope::from_str("one line");
+        // line 5 doesn't exist — should return len_chars, not panic
+        assert_eq!(rope.get_ix(&make_hover(5, 0)), rope.len_chars());
+    }
+
+    #[test]
+    fn test_get_ix_completion_line_out_of_bounds() {
+        let rope = Rope::from_str("one line");
+        assert_eq!(rope.get_ix(&make_completion(5, 0)), rope.len_chars());
+    }
+
+    #[test]
+    fn test_get_ix_goto_line_out_of_bounds() {
+        let rope = Rope::from_str("one line");
+        assert_eq!(rope.get_ix(&make_goto(5, 0)), rope.len_chars());
+    }
+
+    #[test]
+    fn test_get_ix_empty_rope() {
+        let rope = Rope::from_str("");
+        assert_eq!(rope.get_ix(&make_hover(0, 0)), rope.len_chars());
+        assert_eq!(rope.get_ix(&make_completion(0, 0)), rope.len_chars());
+        assert_eq!(rope.get_ix(&make_goto(0, 0)), rope.len_chars());
+    }
+
+    #[test]
+    fn test_get_ix_line_just_past_end() {
+        // Rope with 2 lines (0 and 1); line 2 is out of bounds
+        let rope = Rope::from_str("line0\nline1");
+        assert_eq!(rope.get_ix(&make_hover(2, 0)), rope.len_chars());
     }
 }

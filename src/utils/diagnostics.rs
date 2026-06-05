@@ -225,19 +225,17 @@ pub fn check_unmatched_delimiters_from_source(text: &str, rope: &Rope) -> Vec<Di
     let mut paren_depth = 0;
     let mut paren_start: Option<usize> = None;
 
-    for (i, ch) in text.char_indices() {
+    for (byte_offset, ch) in text.char_indices() {
         if ch == '(' {
             if paren_depth == 0 {
-                paren_start = Some(i);
+                paren_start = Some(byte_offset);
             }
             paren_depth += 1;
         } else if ch == ')' {
             if paren_depth == 0 {
                 // Unmatched closing paren
-                let pos = Position {
-                    line: rope.char_to_line(i) as u32,
-                    character: (i - rope.line_to_char(rope.char_to_line(i))) as u32,
-                };
+                let (line, character) = to_line_char(byte_offset, rope);
+                let pos = Position { line, character };
                 diagnostics.push(Diagnostic {
                     range: Range {
                         start: pos,
@@ -265,10 +263,8 @@ pub fn check_unmatched_delimiters_from_source(text: &str, rope: &Rope) -> Vec<Di
     if paren_depth > 0
         && let Some(start) = paren_start
     {
-        let start_pos = Position {
-            line: rope.char_to_line(start) as u32,
-            character: (start - rope.line_to_char(rope.char_to_line(start))) as u32,
-        };
+        let (line, character) = to_line_char(start, rope);
+        let start_pos = Position { line, character };
         diagnostics.push(Diagnostic {
             range: Range {
                 start: start_pos,
@@ -676,5 +672,81 @@ mod tests {
             !diagnostics.iter().any(|d| d.message.contains("END-CODE")),
             "END-CODE should not be flagged as undefined"
         );
+    }
+
+    #[test]
+    fn test_unmatched_paren_after_multibyte_chars_does_not_crash() {
+        // Regression: char_indices() returns byte offsets, but they were
+        // passed to char_to_line() which expects char offsets. With enough
+        // multi-byte chars the byte offset exceeds len_chars() → panic.
+        let prefix: String = std::iter::repeat('è').take(100).collect();
+        let src = format!("{}\n)", prefix);
+        let rope = Rope::from_str(&src);
+        let diagnostics = check_unmatched_delimiters_from_source(&src, &rope);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unmatched closing parenthesis")),
+        );
+    }
+
+    #[test]
+    fn test_unclosed_paren_after_multibyte_chars_does_not_crash() {
+        let prefix: String = std::iter::repeat('è').take(100).collect();
+        let src = format!("{}\n( unclosed", prefix);
+        let rope = Rope::from_str(&src);
+        let diagnostics = check_unmatched_delimiters_from_source(&src, &rope);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("Unclosed parenthesis")),
+        );
+    }
+
+    #[test]
+    fn test_unmatched_paren_position_after_multibyte_char() {
+        // "\ è\n)" — the ')' is on line 1, character 0.
+        // Before the fix, byte offset 5 was used as char offset,
+        // giving a wrong (or panicking) position.
+        let src = "\\ è\n)";
+        let rope = Rope::from_str(src);
+        let diagnostics = check_unmatched_delimiters_from_source(src, &rope);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 1);
+        assert_eq!(diagnostics[0].range.start.character, 0);
+    }
+
+    #[test]
+    fn test_unclosed_paren_position_after_multibyte_char() {
+        // "\ è\n( open" — the '(' is on line 1, character 0.
+        let src = "\\ è\n( open";
+        let rope = Rope::from_str(src);
+        let diagnostics = check_unmatched_delimiters_from_source(src, &rope);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 1);
+        assert_eq!(diagnostics[0].range.start.character, 0);
+    }
+
+    #[test]
+    fn test_unmatched_paren_position_same_line_as_multibyte() {
+        // "è )" — the ')' is on line 0, character 2 (not byte 3).
+        let src = "è )";
+        let rope = Rope::from_str(src);
+        let diagnostics = check_unmatched_delimiters_from_source(src, &rope);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].range.start.line, 0);
+        assert_eq!(diagnostics[0].range.start.character, 2);
+    }
+
+    #[test]
+    fn test_diagnostics_multibyte_utf8_full_pipeline() {
+        // Full diagnostics pipeline with multi-byte UTF-8 (Italian text)
+        let src = "\\ tabella è unica\r\n: SAVE ( -- ) ;\r\n\\ così il test\r\n";
+        let rope = Rope::from_str(src);
+        let mut index = DefinitionIndex::new();
+        let file_uri = "file:///test/test.f".to_string();
+        index.update_file(&file_uri, &rope);
+        let words = Words::default();
+        let _ = get_diagnostics(&rope, &index, &words);
     }
 }
