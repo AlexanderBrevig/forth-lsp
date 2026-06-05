@@ -155,6 +155,10 @@ pub fn get_code_actions(
         let end_line = range.end.line as usize;
         let end_char = range.end.character as usize;
 
+        if start_line >= rope.len_lines() || end_line >= rope.len_lines() {
+            return actions;
+        }
+
         // Extract selected text
         let start_idx = rope.line_to_char(start_line) + start_char;
         let end_idx = rope.line_to_char(end_line) + end_char;

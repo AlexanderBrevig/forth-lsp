@@ -368,4 +368,45 @@ mod tests {
             panic!("Expected Markup hover contents");
         }
     }
+
+    #[test]
+    fn test_hover_multibyte_utf8_file() {
+        use crate::utils::definition_index::DefinitionIndex;
+        use crate::utils::ropey::word_on_or_before::WordOnOrBefore;
+        use ropey::Rope;
+
+        // Simulate a Forth file with Italian comments (multi-byte UTF-8)
+        let src = "\\ tabella è unica\r\n: SAVE_BATT ( -- ) ;\r\n\\ così il test\r\n";
+        let rope = Rope::from_str(src);
+
+        let mut index = DefinitionIndex::new();
+        let file_uri = "file:///test/test.f".to_string();
+        index.update_file(&file_uri, &rope);
+
+        let mut files = HashMap::new();
+        files.insert(file_uri, rope.clone());
+        let words = Words::default();
+
+        for line in 0..rope.len_lines() {
+            let line_start = rope.line_to_char(line);
+            let line_end = if line + 1 < rope.len_lines() {
+                rope.line_to_char(line + 1)
+            } else {
+                rope.len_chars()
+            };
+            let line_len = line_end - line_start;
+            for character in [0, line_len / 2, line_len.saturating_sub(1)] {
+                let ix = line_start + character;
+                if ix < rope.len_chars() {
+                    let word = rope.word_on_or_before(ix);
+                    let _ = get_hover_result(
+                        &word.to_string(),
+                        &words,
+                        Some(&index),
+                        Some(&files),
+                    );
+                }
+            }
+        }
+    }
 }
