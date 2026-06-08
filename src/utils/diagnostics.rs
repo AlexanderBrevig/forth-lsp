@@ -679,7 +679,7 @@ mod tests {
         // Regression: char_indices() returns byte offsets, but they were
         // passed to char_to_line() which expects char offsets. With enough
         // multi-byte chars the byte offset exceeds len_chars() → panic.
-        let prefix: String = std::iter::repeat('è').take(100).collect();
+        let prefix: String = "è".repeat(100);
         let src = format!("{}\n)", prefix);
         let rope = Rope::from_str(&src);
         let diagnostics = check_unmatched_delimiters_from_source(&src, &rope);
@@ -692,7 +692,7 @@ mod tests {
 
     #[test]
     fn test_unclosed_paren_after_multibyte_chars_does_not_crash() {
-        let prefix: String = std::iter::repeat('è').take(100).collect();
+        let prefix: String = "è".repeat(100);
         let src = format!("{}\n( unclosed", prefix);
         let rope = Rope::from_str(&src);
         let diagnostics = check_unmatched_delimiters_from_source(&src, &rope);

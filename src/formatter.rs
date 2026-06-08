@@ -471,6 +471,31 @@ impl DefaultFormatter {
     }
 }
 
+pub struct NullFormatter;
+
+impl NullFormatter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Formatter for NullFormatter {
+    fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>> {
+        let source = rope.to_string();
+        Ok(vec![TextEdit {
+            range: Range::new(
+                Position::new(0, 0),
+                Position::new(rope.len_lines() as u32, 0),
+            ),
+            new_text: source,
+        }])
+    }
+
+    fn format_source(&self, source: &str) -> Result<String> {
+        Ok(source.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -900,30 +925,5 @@ dup ;";
         // Should preserve inline comments even in preserve mode
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
-    }
-}
-
-pub struct NullFormatter;
-
-impl NullFormatter {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Formatter for NullFormatter {
-    fn format_document(&self, rope: &Rope) -> Result<Vec<TextEdit>> {
-        let source = rope.to_string();
-        Ok(vec![TextEdit {
-            range: Range::new(
-                Position::new(0, 0),
-                Position::new(rope.len_lines() as u32, 0),
-            ),
-            new_text: source,
-        }])
-    }
-
-    fn format_source(&self, source: &str) -> Result<String> {
-        Ok(source.to_string())
     }
 }

@@ -365,9 +365,9 @@ mod tests {
         assert_eq!(word2.value, x);
     }
 
-    const PREFIXES: [&'static str; 6] = ["$", "#", "&", "%", "0x", ""];
+    const PREFIXES: [&str; 6] = ["$", "#", "&", "%", "0x", ""];
 
-    const DIGITS: [&'static str; 6] = [
+    const DIGITS: [&str; 6] = [
         "0123456789abcdef",
         "012345789",
         "012345679",
@@ -376,7 +376,7 @@ mod tests {
         "012345689",
     ];
 
-    const NON_DIGITS: [&'static str; 6] = [
+    const NON_DIGITS: [&str; 6] = [
         "0123456789abcdefg",
         "012345789a",
         "012345689a",
@@ -447,7 +447,7 @@ mod tests {
         for prefix in PREFIXES {
             // Prefix without digits
             if !prefix.is_empty() {
-                should_parse_word(format!("{prefix}"));
+                should_parse_word(prefix.to_string());
             }
             should_parse_word(format!("{prefix}-"));
             should_parse_word(format!("-{prefix}"));

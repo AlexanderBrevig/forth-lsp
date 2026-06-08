@@ -156,7 +156,7 @@ impl BuiltinConfig {
     /// Convert all custom words (inline + from files) into leaked `Word<'static>` references
     /// suitable for pushing into `Words.words`. Since the LSP runs for the process lifetime,
     /// leaking is appropriate.
-    pub fn into_static_words(&self, workspace_root: Option<&str>) -> Vec<&'static Word<'static>> {
+    pub fn to_static_words(&self, workspace_root: Option<&str>) -> Vec<&'static Word<'static>> {
         let mut all_custom = self.words.clone();
         if let Some(root) = workspace_root {
             all_custom.extend(self.load_words_from_files(root));
@@ -470,7 +470,7 @@ mod tests {
     }
 
     #[test]
-    fn test_into_static_words_combines_inline_and_files() {
+    fn test_to_static_words_combines_inline_and_files() {
         use tempfile::TempDir;
 
         let dir = TempDir::new().unwrap();
@@ -486,7 +486,7 @@ mod tests {
             word_files: vec!["extra.words".to_string()],
         };
 
-        let static_words = config.into_static_words(Some(dir.path().to_str().unwrap()));
+        let static_words = config.to_static_words(Some(dir.path().to_str().unwrap()));
         assert_eq!(static_words.len(), 3);
         assert_eq!(static_words[0].token, "INLINE1");
         assert_eq!(static_words[0].stack, "( -- )");
