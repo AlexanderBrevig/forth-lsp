@@ -83,7 +83,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     eprintln!("Indexed {} files", files.len());
 
     let mut data = Words::default();
-    let custom_words = config.builtin.into_static_words(workspace_root.as_deref());
+    let custom_words = config.builtin.to_static_words(workspace_root.as_deref());
     data.words.extend(custom_words);
     for msg in &connection.receiver {
         match msg {
