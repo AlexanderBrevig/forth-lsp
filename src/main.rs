@@ -178,6 +178,19 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+const FORTH_EXTENSIONS: &[&str] = &["f", "fth", "fs", "4th", "forth", "frt"];
+
+fn is_forth_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .map(|ext| {
+            FORTH_EXTENSIONS
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(ext))
+        })
+        .unwrap_or(false)
+}
+
 fn load_dir(
     root: &str, //lsp_types::WorkspaceFolder,
     files: &mut HashMap<String, Rope>,
@@ -187,7 +200,7 @@ fn load_dir(
             if let Some(entry) = path?.path().to_str() {
                 if fs::metadata(entry)?.is_dir() {
                     load_dir(entry, files)?;
-                } else if Path::new(entry).extension().and_then(OsStr::to_str) == Some("forth") {
+                } else if is_forth_file(Path::new(entry)) {
                     eprintln!("FORTH load {}", entry);
                     let raw_content = fs::read(entry)?;
                     let content = String::from_utf8_lossy(&raw_content);

@@ -129,25 +129,18 @@ pub fn handle_hover(
     match cast::<HoverRequest>(req.clone()) {
         Ok((id, params)) => {
             log_request!(id, params);
-            let rope = if let Some(rope) =
-                files.for_position_param(&params.text_document_position_params)
-            {
-                rope
-            } else {
-                return Err(Error::NoSuchFile(
-                    params
-                        .text_document_position_params
-                        .text_document
-                        .uri
-                        .to_string(),
-                ));
-            };
-            let ix = rope.get_ix(&params);
-            if ix >= rope.len_chars() {
-                return Err(Error::OutOfBounds(ix));
-            }
-            let word = rope.word_on_or_before(ix);
-            let result = get_hover_result(&word.to_string(), data, Some(def_index), Some(files));
+            let word = files
+                .for_position_param(&params.text_document_position_params)
+                .and_then(|rope| {
+                    let ix = rope.get_ix(&params);
+                    if ix >= rope.len_chars() {
+                        return None;
+                    }
+                    Some(rope.word_on_or_before(ix).to_string())
+                });
+            let result = word.and_then(|w| {
+                get_hover_result(&w, data, Some(def_index), Some(files))
+            });
             send_response(connection, id, result)?;
             Ok(())
         }
