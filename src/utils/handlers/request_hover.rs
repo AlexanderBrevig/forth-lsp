@@ -138,9 +138,8 @@ pub fn handle_hover(
                     }
                     Some(rope.word_on_or_before(ix).to_string())
                 });
-            let result = word.and_then(|w| {
-                get_hover_result(&w, data, Some(def_index), Some(files))
-            });
+            let result =
+                word.and_then(|w| get_hover_result(&w, data, Some(def_index), Some(files)));
             send_response(connection, id, result)?;
             Ok(())
         }
@@ -392,12 +391,7 @@ mod tests {
                 let ix = line_start + character;
                 if ix < rope.len_chars() {
                     let word = rope.word_on_or_before(ix);
-                    let _ = get_hover_result(
-                        &word.to_string(),
-                        &words,
-                        Some(&index),
-                        Some(&files),
-                    );
+                    let _ = get_hover_result(&word.to_string(), &words, Some(&index), Some(&files));
                 }
             }
         }

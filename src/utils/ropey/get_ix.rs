@@ -21,8 +21,7 @@ impl GetIx<HoverParams> for Rope {
         if line >= self.len_lines() {
             return self.len_chars();
         }
-        self.line_to_char(line)
-            + params.text_document_position_params.position.character as usize
+        self.line_to_char(line) + params.text_document_position_params.position.character as usize
     }
 }
 
@@ -32,8 +31,7 @@ impl GetIx<GotoTypeDefinitionParams> for Rope {
         if line >= self.len_lines() {
             return self.len_chars();
         }
-        self.line_to_char(line)
-            + params.text_document_position_params.position.character as usize
+        self.line_to_char(line) + params.text_document_position_params.position.character as usize
     }
 }
 
