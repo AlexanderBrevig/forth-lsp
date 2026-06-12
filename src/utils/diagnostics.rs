@@ -80,21 +80,22 @@ pub fn check_undefined_words_from_tokens(
         if let Token::Word(data) = token {
             let word_lower = data.value.to_lowercase();
 
-            // Check if this starts a string literal
-            if matches!(word_lower.as_str(), ".\"" | "s\"" | "c\"" | "abort\"") {
-                in_string_literal = true;
-                defined_words.insert(word_lower.clone()); // Ensure string words are defined
-                continue;
-            }
-
-            // Check if this ends a string literal
-            if in_string_literal && data.value.ends_with('"') {
-                in_string_literal = false;
-                continue;
-            }
-
-            // Skip words inside string literals
+            // String literals: in Forth, a word ending in `"` introduces a
+            // string that runs until the next word ending in `"`. This covers
+            // standard words (`."`, `s"`, `c"`, `abort"`), gforth's escaped
+            // variants (`s\"`, `.\"`), and debugger words (`break"`), as well
+            // as any dialect-specific `..."` word, without an allowlist.
             if in_string_literal {
+                // We're inside a string; the closing word also ends in `"`.
+                if data.value.ends_with('"') {
+                    in_string_literal = false;
+                }
+                // Either way, skip the string contents / closing word.
+                continue;
+            }
+            if data.value.ends_with('"') {
+                in_string_literal = true;
+                defined_words.insert(word_lower.clone()); // Treat opener as known
                 continue;
             }
 
@@ -469,6 +470,76 @@ mod tests {
             diagnostics.len(),
             0,
             "String literal content should not be flagged as undefined"
+        );
+    }
+
+    #[test]
+    fn test_gforth_escaped_string_not_flagged() {
+        // gforth `s\"` creates an escaped string; contents must not be flagged.
+        let rope = Rope::from_str(r#": greet s\" Hello world " type ;"#);
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Escaped string (s\\\") contents should not be flagged: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn test_arbitrary_quote_word_not_flagged() {
+        // Any word ending in `"` opens a string (e.g. gforth's debugger
+        // `break"`), so its contents must not be flagged as undefined.
+        let rope = Rope::from_str(r#": foo break" stopped here " ;"#);
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Contents after a `...\"` word should not be flagged: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_strings_on_one_line() {
+        let rope = Rope::from_str(r#": foo s" alpha" s" beta" ;"#);
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Neither string's contents should be flagged: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn test_undefined_word_after_string_still_flagged() {
+        // The string must close at the next `"`-word so later code is still
+        // checked; `zzzundefined` should be reported.
+        let rope = Rope::from_str(r#": foo s" hello " zzzundefined ;"#);
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "expected one diagnostic: {diagnostics:?}"
+        );
+        assert!(
+            diagnostics[0].message.contains("zzzundefined"),
+            "expected zzzundefined to be flagged: {:?}",
+            diagnostics[0].message
         );
     }
 
