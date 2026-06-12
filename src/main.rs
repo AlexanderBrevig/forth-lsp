@@ -24,6 +24,7 @@ use crate::utils::handlers::request_semantic_tokens::handle_semantic_tokens_full
 use crate::utils::handlers::request_signature_help::handle_signature_help;
 use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
 use crate::utils::server_capabilities::forth_lsp_capabilities;
+use crate::utils::uri_helpers::uri_to_path;
 use crate::words::Words;
 
 use std::collections::HashMap;
@@ -60,18 +61,24 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     let init: InitializeParams = serde_json::from_value(params)?;
     let mut files = HashMap::<String, Rope>::new();
 
-    // Load configuration from workspace root
+    // Load configuration from workspace root. Workspace folder URIs arrive as
+    // percent-encoded `file://` URIs, so convert them to real filesystem paths
+    // (handles `%XX` escapes and Windows drive letters) rather than using the
+    // raw URI path component.
     let workspace_root: Option<String> = init
         .workspace_folders
         .as_ref()
         .and_then(|folders| folders.first())
-        .map(|folder| folder.uri.path().to_string());
+        .and_then(|folder| uri_to_path(&folder.uri))
+        .map(|path| path.to_string_lossy().into_owned());
     let config = Config::load_from_workspace(workspace_root.as_deref());
 
     if let Some(roots) = init.workspace_folders {
         eprintln!("Root: {:?}", roots);
         for root in roots {
-            load_dir(root.uri.path().as_str(), &mut files)?;
+            if let Some(path) = uri_to_path(&root.uri) {
+                load_dir(&path.to_string_lossy(), &mut files)?;
+            }
         }
     }
 

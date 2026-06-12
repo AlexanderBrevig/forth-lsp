@@ -1,7 +1,35 @@
 //! Helper functions for working with URIs in LSP.
 
 use lsp_types::Uri;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Convert a `file://` URI to a local filesystem path.
+///
+/// LSP clients send workspace folders and document URIs as percent-encoded
+/// `file://` URIs per the URI spec, so the raw [`Uri::path`] is *not* a usable
+/// filesystem path. This decodes percent escapes (e.g. `%20` -> space,
+/// `%3A` -> `:`) and, on Windows, strips the leading `/` that precedes the
+/// drive letter in `file:///C:/...` URIs.
+///
+/// Returns `None` for non-`file` URIs.
+pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
+    // Only `file:` URIs map to local paths. Scheme comparison is
+    // case-insensitive per RFC 3986.
+    match uri.scheme() {
+        Some(scheme) if scheme.as_str().eq_ignore_ascii_case("file") => {}
+        _ => return None,
+    }
+
+    let decoded = uri.path().as_estr().decode().into_string_lossy();
+    let decoded: &str = decoded.as_ref();
+
+    // On Windows the decoded path looks like `/C:/Users/...`; drop the leading
+    // slash so it becomes a valid `C:/Users/...` path.
+    #[cfg(windows)]
+    let decoded = decoded.trim_start_matches('/');
+
+    Some(PathBuf::from(decoded))
+}
 
 /// Convert a file path to a URI.
 ///
@@ -25,6 +53,38 @@ pub fn path_str_to_uri(path: &str) -> Option<Uri> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_family = "unix")]
+    fn test_uri_to_path_unix() {
+        let uri: Uri = "file:///home/user/project".parse().unwrap();
+        let path = uri_to_path(&uri).unwrap();
+        assert_eq!(path, PathBuf::from("/home/user/project"));
+    }
+
+    #[test]
+    #[cfg(target_family = "unix")]
+    fn test_uri_to_path_percent_decoded() {
+        // Spaces and other reserved chars arrive percent-encoded.
+        let uri: Uri = "file:///home/user/my%20project".parse().unwrap();
+        let path = uri_to_path(&uri).unwrap();
+        assert_eq!(path, PathBuf::from("/home/user/my project"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_uri_to_path_windows_drive() {
+        // Windows clients (e.g. eglot) send `file:///c%3A/Users/...`.
+        let uri: Uri = "file:///c%3A/Users/ron/project".parse().unwrap();
+        let path = uri_to_path(&uri).unwrap();
+        assert_eq!(path, PathBuf::from("c:/Users/ron/project"));
+    }
+
+    #[test]
+    fn test_uri_to_path_rejects_non_file_scheme() {
+        let uri: Uri = "https://example.com/foo".parse().unwrap();
+        assert!(uri_to_path(&uri).is_none());
+    }
 
     #[test]
     fn test_path_to_uri() {
