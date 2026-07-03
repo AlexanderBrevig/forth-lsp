@@ -296,6 +296,35 @@ mod tests {
         assert_eq!(tokens, expected)
     }
 
+    // Regression tests for https://github.com/AlexanderBrevig/forth-lsp/issues/49
+    // Words that start with digits (or otherwise look number-ish) but contain
+    // non-numeric characters must lex as a single `Word`, never split into a
+    // `Number` prefix plus a trailing `Word` (e.g. `2DUP` must not become
+    // `2D` + `UP`).
+    #[test]
+    fn test_parse_digit_prefixed_words_issue_49() {
+        for word in ["2DUP", "2DROP", "2SWAP", "2OVER", "2!", "2@", "54?", "3RD"] {
+            let mut lexer = Lexer::new(word);
+            let tokens = lexer.parse();
+            assert_eq!(
+                tokens,
+                vec![Word(Data::new(0, word.len(), word))],
+                "expected {word:?} to lex as a single Word token"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_digit_prefixed_words_in_context_issue_49() {
+        let mut lexer = Lexer::new("2DUP 2DROP");
+        let tokens = lexer.parse();
+        let expected = vec![
+            Word(Data::new(0, 4, "2DUP")),
+            Word(Data::new(5, 10, "2DROP")),
+        ];
+        assert_eq!(tokens, expected)
+    }
+
     #[test]
     fn test_parse_number_char() {
         let mut lexer = Lexer::new("'c'");
