@@ -445,6 +445,32 @@ mod tests {
     }
 
     #[test]
+    fn test_digit_prefixed_builtins_not_split_issue_49() {
+        // Regression for https://github.com/AlexanderBrevig/forth-lsp/issues/49
+        // Words like `2DUP` / `2DROP` must be treated as whole words, never
+        // split into a number prefix (`2D`) plus a trailing word (`UP`).
+        let rope = Rope::from_str(": test 2DUP 2DROP 2SWAP ;");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        for d in &diagnostics {
+            eprintln!("Diagnostic: {}", d.message);
+        }
+        // No spurious diagnostics for the split-off fragments...
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message == "Undefined word: UP"
+                    || d.message == "Undefined word: 2D"),
+            "digit-prefixed builtins must not be split into number + word"
+        );
+        // ...and since 2DUP/2DROP/2SWAP are builtins, nothing at all is flagged.
+        assert_eq!(diagnostics.len(), 0, "No diagnostics expected");
+    }
+
+    #[test]
     fn test_undefined_word_warning() {
         let rope = Rope::from_str(": test undefined-word ;");
         let index = DefinitionIndex::new();
