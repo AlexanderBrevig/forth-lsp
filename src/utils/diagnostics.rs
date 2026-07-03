@@ -462,8 +462,7 @@ mod tests {
         assert!(
             !diagnostics
                 .iter()
-                .any(|d| d.message == "Undefined word: UP"
-                    || d.message == "Undefined word: 2D"),
+                .any(|d| d.message == "Undefined word: UP" || d.message == "Undefined word: 2D"),
             "digit-prefixed builtins must not be split into number + word"
         );
         // ...and since 2DUP/2DROP/2SWAP are builtins, nothing at all is flagged.
