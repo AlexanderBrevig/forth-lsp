@@ -46,8 +46,7 @@ pub fn send_response<T: serde::Serialize>(
         .map_err(|e| Error::Generic(format!("Serialization error: {}", e)))?;
     let resp = Response {
         id,
-        result: Some(result),
-        error: None,
+        response_result: Ok(result),
     };
     connection
         .sender
