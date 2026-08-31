@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::words::Word;
@@ -11,6 +12,98 @@ pub struct Config {
 
     #[serde(default)]
     pub builtin: BuiltinConfig,
+
+    #[serde(default)]
+    pub workspace: WorkspaceConfig,
+}
+
+/// Workspace scanning configuration.
+///
+/// Controls which files are discovered and indexed when the server starts up.
+/// The defaults reproduce the historical behaviour (the same Forth extensions
+/// were always recognised) while additionally skipping common noise
+/// directories such as `target` and `node_modules`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspaceConfig {
+    /// File extensions (without the leading dot) treated as Forth source and
+    /// indexed. Override this to drop extensions that clash with other
+    /// languages, e.g. removing `"fs"` when it means F# or GLSL fragment
+    /// shaders in your project.
+    #[serde(default = "default_forth_extensions")]
+    pub extensions: Vec<String>,
+
+    /// Directory or file names to skip while scanning the workspace. Each
+    /// pattern is matched against a single path component (a folder or file
+    /// name, not a full path) and supports `*` and `?` wildcards, e.g.
+    /// `"target"`, `"node_modules"`, or `"*.gen.fs"`.
+    #[serde(default = "default_workspace_exclude")]
+    pub exclude: Vec<String>,
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            extensions: default_forth_extensions(),
+            exclude: default_workspace_exclude(),
+        }
+    }
+}
+
+impl WorkspaceConfig {
+    /// Returns true if `path`'s extension is configured as Forth source.
+    /// Comparison is case-insensitive, matching the historical behaviour.
+    pub fn is_forth_file(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(OsStr::to_str)
+            .map(|ext| {
+                self.extensions
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(ext))
+            })
+            .unwrap_or(false)
+    }
+
+    /// Returns true if the final component (folder or file name) of `path`
+    /// matches one of the exclude patterns. Called per directory entry as the
+    /// scanner descends, so excluding a folder prunes its entire subtree.
+    pub fn is_excluded(&self, path: &Path) -> bool {
+        path.file_name()
+            .and_then(OsStr::to_str)
+            .map(|name| self.exclude.iter().any(|pattern| glob_match(pattern, name)))
+            .unwrap_or(false)
+    }
+}
+
+/// Minimal glob matcher supporting `*` (any run of characters, including empty)
+/// and `?` (exactly one character). Matches the whole `text` against `pattern`
+/// and is applied to a single path component. Kept dependency-free on purpose.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    let (mut pi, mut ti) = (0usize, 0usize);
+    // Backtrack point for the most recent `*` and the text position it began at.
+    let (mut star, mut resume) = (None, 0usize);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            resume = ti;
+            pi += 1;
+        } else if let Some(s) = star {
+            // Last `*` absorbs one more character of `text`, then retry.
+            pi = s + 1;
+            resume += 1;
+            ti = resume;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 /// Formatter configuration
@@ -199,6 +292,25 @@ fn default_true() -> bool {
 
 fn default_word_spacing() -> usize {
     1
+}
+
+/// The Forth extensions recognised historically, before scanning was
+/// configurable. Kept as the default so existing setups are unaffected.
+fn default_forth_extensions() -> Vec<String> {
+    ["f", "fth", "fs", "4th", "forth", "frt"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Directories that are almost never Forth sources and only slow scanning
+/// down. Skipping them by default is strictly better than the old behaviour,
+/// which descended into everything.
+fn default_workspace_exclude() -> Vec<String> {
+    [".git", "target", "node_modules"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 impl Config {
@@ -467,6 +579,82 @@ mod tests {
 
         let words = config.load_words_from_files("/tmp");
         assert!(words.is_empty());
+    }
+
+    #[test]
+    fn test_workspace_defaults_match_legacy_extensions() {
+        // No config must behave exactly like the old hardcoded list.
+        let ws = WorkspaceConfig::default();
+        for ext in ["f", "fth", "fs", "4th", "forth", "frt"] {
+            assert!(
+                ws.is_forth_file(Path::new(&format!("x.{ext}"))),
+                "{ext} should be recognised as forth"
+            );
+        }
+        // Case-insensitive, like the old behaviour.
+        assert!(ws.is_forth_file(Path::new("PROG.FTH")));
+        // Non-forth extensions are ignored.
+        assert!(!ws.is_forth_file(Path::new("main.rs")));
+        assert!(!ws.is_forth_file(Path::new("noext")));
+    }
+
+    #[test]
+    fn test_workspace_default_exclude_skips_noise_dirs() {
+        let ws = WorkspaceConfig::default();
+        assert!(ws.is_excluded(Path::new("/proj/target")));
+        assert!(ws.is_excluded(Path::new("/proj/node_modules")));
+        assert!(ws.is_excluded(Path::new("/proj/.git")));
+        assert!(!ws.is_excluded(Path::new("/proj/src")));
+        // Only the final component is matched, so a project living under a
+        // path that happens to contain "target" is not wrongly excluded.
+        assert!(!ws.is_excluded(Path::new("/home/me/target-practice/src")));
+    }
+
+    #[test]
+    fn test_workspace_extensions_override_drops_fs() {
+        // The .fs clash fix: user redefines the extension set without "fs".
+        let toml_content = r#"
+            [workspace]
+            extensions = ["f", "fth", "4th", "forth", "frt"]
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(!config.workspace.is_forth_file(Path::new("shader.fs")));
+        assert!(config.workspace.is_forth_file(Path::new("prog.fth")));
+        // exclude falls back to its default when only extensions is set.
+        assert!(config.workspace.is_excluded(Path::new("/p/target")));
+    }
+
+    #[test]
+    fn test_workspace_exclude_override_and_globs() {
+        let toml_content = r#"
+            [workspace]
+            exclude = ["shaders", "*.gen.fs", "vendor?"]
+        "#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let ws = &config.workspace;
+        assert!(ws.is_excluded(Path::new("/p/shaders")));
+        assert!(ws.is_excluded(Path::new("/p/foo.gen.fs")));
+        assert!(ws.is_excluded(Path::new("/p/vendor1")));
+        assert!(!ws.is_excluded(Path::new("/p/vendor"))); // ? needs exactly one char
+        assert!(!ws.is_excluded(Path::new("/p/target"))); // overridden away
+        // extensions fall back to default when only exclude is set.
+        assert!(ws.is_forth_file(Path::new("x.fs")));
+    }
+
+    #[test]
+    fn test_glob_match() {
+        assert!(glob_match("target", "target"));
+        assert!(!glob_match("target", "targets"));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("*.fs", "shader.fs"));
+        assert!(glob_match("*.gen.fs", "a.b.gen.fs"));
+        assert!(!glob_match("*.fs", "shader.fsx"));
+        assert!(glob_match("v?", "v1"));
+        assert!(!glob_match("v?", "v"));
+        assert!(!glob_match("v?", "v12"));
+        assert!(glob_match("a*c", "abbbc"));
+        assert!(glob_match("a*c", "ac"));
+        assert!(!glob_match("a*c", "ab"));
     }
 
     #[test]
