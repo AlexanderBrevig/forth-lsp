@@ -66,44 +66,20 @@ impl WorkspaceConfig {
     /// Returns true if the final component (folder or file name) of `path`
     /// matches one of the exclude patterns. Called per directory entry as the
     /// scanner descends, so excluding a folder prunes its entire subtree.
+    /// Patterns use standard shell-glob semantics (`*`, `?`, `[..]`); an
+    /// invalid pattern simply never matches.
     pub fn is_excluded(&self, path: &Path) -> bool {
         path.file_name()
             .and_then(OsStr::to_str)
-            .map(|name| self.exclude.iter().any(|pattern| glob_match(pattern, name)))
+            .map(|name| {
+                self.exclude.iter().any(|pattern| {
+                    glob::Pattern::new(pattern)
+                        .map(|p| p.matches(name))
+                        .unwrap_or(false)
+                })
+            })
             .unwrap_or(false)
     }
-}
-
-/// Minimal glob matcher supporting `*` (any run of characters, including empty)
-/// and `?` (exactly one character). Matches the whole `text` against `pattern`
-/// and is applied to a single path component. Kept dependency-free on purpose.
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    let (mut pi, mut ti) = (0usize, 0usize);
-    // Backtrack point for the most recent `*` and the text position it began at.
-    let (mut star, mut resume) = (None, 0usize);
-    while ti < t.len() {
-        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
-            pi += 1;
-            ti += 1;
-        } else if pi < p.len() && p[pi] == '*' {
-            star = Some(pi);
-            resume = ti;
-            pi += 1;
-        } else if let Some(s) = star {
-            // Last `*` absorbs one more character of `text`, then retry.
-            pi = s + 1;
-            resume += 1;
-            ti = resume;
-        } else {
-            return false;
-        }
-    }
-    while pi < p.len() && p[pi] == '*' {
-        pi += 1;
-    }
-    pi == p.len()
 }
 
 /// Formatter configuration
@@ -642,19 +618,26 @@ mod tests {
     }
 
     #[test]
-    fn test_glob_match() {
-        assert!(glob_match("target", "target"));
-        assert!(!glob_match("target", "targets"));
-        assert!(glob_match("*", "anything"));
-        assert!(glob_match("*.fs", "shader.fs"));
-        assert!(glob_match("*.gen.fs", "a.b.gen.fs"));
-        assert!(!glob_match("*.fs", "shader.fsx"));
-        assert!(glob_match("v?", "v1"));
-        assert!(!glob_match("v?", "v"));
-        assert!(!glob_match("v?", "v12"));
-        assert!(glob_match("a*c", "abbbc"));
-        assert!(glob_match("a*c", "ac"));
-        assert!(!glob_match("a*c", "ab"));
+    fn test_exclude_glob_semantics() {
+        // Exercises the glob crate through the public API on single components.
+        let ws = |patterns: &[&str]| WorkspaceConfig {
+            extensions: default_forth_extensions(),
+            exclude: patterns.iter().map(|s| s.to_string()).collect(),
+        };
+        let excluded = |patterns: &[&str], name: &str| {
+            ws(patterns).is_excluded(&Path::new("/p").join(name))
+        };
+
+        assert!(excluded(&["target"], "target"));
+        assert!(!excluded(&["target"], "targets"));
+        assert!(excluded(&["*.fs"], "shader.fs"));
+        assert!(excluded(&["*.gen.fs"], "a.b.gen.fs"));
+        assert!(!excluded(&["*.fs"], "shader.fsx"));
+        assert!(excluded(&["v?"], "v1"));
+        assert!(!excluded(&["v?"], "v"));
+        assert!(!excluded(&["v?"], "v12"));
+        // Invalid patterns are ignored rather than panicking.
+        assert!(!excluded(&["["], "anything"));
     }
 
     #[test]

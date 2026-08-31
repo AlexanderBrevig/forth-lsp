@@ -93,6 +93,7 @@ version = "0.8.2"
 dependencies = [
  "anyhow",
  "forth-lexer",
+ "glob",
  "lsp-server",
  "lsp-types",
  "ropey",
@@ -115,6 +116,12 @@ dependencies = [
  "wasip2",
  "wasip3",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "hashbrown"
