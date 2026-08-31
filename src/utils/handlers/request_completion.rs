@@ -12,11 +12,31 @@ use crate::{
 
 use std::collections::{HashMap, HashSet};
 
+use forth_lexer::{parser::Lexer, token::Token};
 use lsp_server::{Connection, Request};
 use lsp_types::{CompletionItem, CompletionResponse, request::Completion};
 use ropey::Rope;
 
 use super::cast;
+
+/// True if `char_ix` (a char index into `rope`) sits inside a comment.
+///
+/// Forth uses `\ ...` line comments and `( ... )` comments, and both are single
+/// tokens spanning their whole text — so a `:` (or any word) typed inside one is
+/// part of the comment, not code. We suppress completions there. The comment's
+/// end offset is treated inclusively so completions are also suppressed when the
+/// cursor is appended to the very end of a comment (the report in #41).
+fn position_in_comment(rope: &Rope, char_ix: usize) -> bool {
+    let char_ix = char_ix.min(rope.len_chars());
+    let byte_ix = rope.char_to_byte(char_ix);
+    let source = rope.to_string();
+    Lexer::new(&source).parse().iter().any(|tok| {
+        matches!(tok, Token::Comment(_) | Token::StackComment(_)) && {
+            let data = tok.get_data();
+            data.start <= byte_ix && byte_ix <= data.end
+        }
+    })
+}
 
 // Extract completion logic for testing
 pub fn get_completions(
@@ -177,6 +197,12 @@ pub fn handle_completion(
             if ix >= rope.len_chars() {
                 return Err(Error::OutOfBounds(ix));
             }
+            // Don't offer completions inside comments (e.g. a `:` typed in a
+            // `\ ...` or `( ... )` comment is prose, not a colon definition).
+            if position_in_comment(rope, ix) {
+                send_response(connection, id, None::<CompletionResponse>)?;
+                return Ok(());
+            }
             if let Some(char_at_ix) = rope.get_char(ix)
                 && char_at_ix.is_whitespace()
                 && ix > 0
@@ -211,6 +237,51 @@ pub fn handle_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Char index just past the last occurrence of `needle` in `text`.
+    fn after(text: &str, needle: &str) -> usize {
+        let byte = text.rfind(needle).expect("needle present") + needle.len();
+        Rope::from_str(text).byte_to_char(byte)
+    }
+
+    #[test]
+    fn test_position_in_comment_line_comment() {
+        let text = "\\ make a thing : like this\n: real dup * ;\n";
+        let rope = Rope::from_str(text);
+        // A colon typed inside the line comment is not code.
+        assert!(position_in_comment(&rope, after(text, "thing :")));
+        // The real definition's colon on the next line is code.
+        assert!(!position_in_comment(&rope, after(text, ": real")));
+    }
+
+    #[test]
+    fn test_position_in_comment_paren_and_stack() {
+        let text = ": foo ( a -- b ) dup ;\n( note the : here )\n";
+        let rope = Rope::from_str(text);
+        // Inside a stack comment.
+        assert!(position_in_comment(&rope, after(text, "a --")));
+        // Inside a plain paren comment, on the colon.
+        assert!(position_in_comment(&rope, after(text, "the :")));
+        // The word after the stack comment is code.
+        assert!(!position_in_comment(&rope, after(text, "dup")));
+    }
+
+    #[test]
+    fn test_position_in_comment_appending_at_end() {
+        // Cursor sits at the very end of a line comment the user just typed a
+        // colon into (no trailing newline yet) — the #41 scenario.
+        let text = "\\ make a thing :";
+        let rope = Rope::from_str(text);
+        assert!(position_in_comment(&rope, rope.len_chars()));
+    }
+
+    #[test]
+    fn test_position_in_comment_plain_code_is_false() {
+        let text = ": square dup * ;\n";
+        let rope = Rope::from_str(text);
+        assert!(!position_in_comment(&rope, after(text, "dup")));
+        assert!(!position_in_comment(&rope, after(text, ": squ")));
+    }
 
     #[test]
     fn test_completion_finds_matching_words() {
