@@ -43,6 +43,16 @@ description = "Does something special"
 [format]
 indent_width = 2
 use_spaces = true
+
+[workspace]
+# Extensions (without the dot) treated as Forth source and indexed.
+# Drop "fs" here if it collides with F# or GLSL fragment shaders in your project.
+extensions = ["f", "fth", "fs", "4th", "forth", "frt"]
+
+# Folder/file names to skip while scanning. Each pattern matches a single
+# path component and supports `*` and `?` wildcards.
+# Defaults already skip .git, target and node_modules.
+exclude = [".git", "target", "node_modules"]
 ```
 
 ## Contributing

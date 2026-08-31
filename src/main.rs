@@ -5,7 +5,7 @@ mod prelude;
 mod utils;
 mod words;
 
-use crate::config::Config;
+use crate::config::{Config, WorkspaceConfig};
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::handlers::notification_did_change::handle_did_change_text_document;
@@ -28,9 +28,7 @@ use crate::utils::uri_helpers::uri_to_path;
 use crate::words::Words;
 
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs;
-use std::path::Path;
 
 use lsp_server::{Connection, Message};
 use lsp_types::InitializeParams;
@@ -77,7 +75,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
         eprintln!("Root: {:?}", roots);
         for root in roots {
             if let Some(path) = uri_to_path(&root.uri) {
-                load_dir(&path.to_string_lossy(), &mut files)?;
+                load_dir(&path.to_string_lossy(), &mut files, &config.workspace)?;
             }
         }
     }
@@ -185,29 +183,25 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-const FORTH_EXTENSIONS: &[&str] = &["f", "fth", "fs", "4th", "forth", "frt"];
-
-fn is_forth_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .map(|ext| {
-            FORTH_EXTENSIONS
-                .iter()
-                .any(|known| known.eq_ignore_ascii_case(ext))
-        })
-        .unwrap_or(false)
-}
-
 fn load_dir(
     root: &str, //lsp_types::WorkspaceFolder,
     files: &mut HashMap<String, Rope>,
+    workspace: &WorkspaceConfig,
 ) -> Result<()> {
     if let Ok(paths) = fs::read_dir(root) {
         for path in paths {
-            if let Some(entry) = path?.path().to_str() {
+            let path = path?.path();
+            // Prune excluded folders/files before descending or reading them.
+            if workspace.is_excluded(&path) {
+                if let Some(name) = path.to_str() {
+                    eprintln!("FORTH skip {}", name);
+                }
+                continue;
+            }
+            if let Some(entry) = path.to_str() {
                 if fs::metadata(entry)?.is_dir() {
-                    load_dir(entry, files)?;
-                } else if is_forth_file(Path::new(entry)) {
+                    load_dir(entry, files, workspace)?;
+                } else if workspace.is_forth_file(&path) {
                     eprintln!("FORTH load {}", entry);
                     let raw_content = fs::read(entry)?;
                     let content = String::from_utf8_lossy(&raw_content);

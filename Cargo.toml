@@ -25,6 +25,7 @@ toml = "1"
 ropey = "1.6.1"
 anyhow = "1.0.102"
 thiserror = "2.0.18"
+glob = "0.3"
 
 [dependencies.forth-lexer]
 version = "0.2.1"
