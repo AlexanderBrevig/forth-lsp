@@ -624,9 +624,8 @@ mod tests {
             extensions: default_forth_extensions(),
             exclude: patterns.iter().map(|s| s.to_string()).collect(),
         };
-        let excluded = |patterns: &[&str], name: &str| {
-            ws(patterns).is_excluded(&Path::new("/p").join(name))
-        };
+        let excluded =
+            |patterns: &[&str], name: &str| ws(patterns).is_excluded(&Path::new("/p").join(name));
 
         assert!(excluded(&["target"], "target"));
         assert!(!excluded(&["target"], "targets"));
