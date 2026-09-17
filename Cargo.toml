@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"
+clap = { version = "4", features = ["derive"] }
 glob = "0.3"
 lsp-server = "0.10.0"
 lsp-types = "0.97.0"

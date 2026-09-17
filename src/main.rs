@@ -1,3 +1,4 @@
+mod cli;
 mod config;
 mod error;
 mod formatter;
@@ -5,6 +6,8 @@ mod prelude;
 mod utils;
 mod words;
 
+use clap::Parser;
+use crate::cli::Cli;
 use crate::config::{Config, WorkspaceConfig};
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
@@ -36,6 +39,12 @@ use lsp_types::InitializeParams;
 use ropey::Rope;
 
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+    if cli.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Note that  we must have our logging only write out to stderr.
     eprintln!("starting generic LSP server");
 
