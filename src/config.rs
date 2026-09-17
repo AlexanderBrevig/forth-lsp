@@ -312,6 +312,14 @@ pub fn default_skip_words() -> Vec<String> {
         .collect()
 }
 
+/// Returns true if `word` is one of `skip_words` (case-insensitive).
+///
+/// Shared by the diagnostics checker and the formatter so the two stay in
+/// lockstep on what counts as a skip/parsing word.
+pub fn is_skip_word(skip_words: &[String], word: &str) -> bool {
+    skip_words.iter().any(|sw| sw.eq_ignore_ascii_case(word))
+}
+
 impl Config {
     /// Load configuration from a TOML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {

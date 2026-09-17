@@ -34,8 +34,14 @@ pub fn handle_did_save_text_document(
                 log_debug!("Updating definition index on save for: {}", file_uri);
                 def_index.update_file_from_tokens(&file_uri, &tokens, rope);
 
-                let diagnostics =
-                    get_diagnostics_from_tokens(&tokens, &source, rope, def_index, builtin_words, config);
+                let diagnostics = get_diagnostics_from_tokens(
+                    &tokens,
+                    &source,
+                    rope,
+                    def_index,
+                    builtin_words,
+                    config,
+                );
                 publish_diagnostics(
                     connection,
                     params.text_document.uri.clone(),

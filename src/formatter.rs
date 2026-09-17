@@ -17,10 +17,10 @@ pub trait Formatter {
 pub fn create_formatter(config: &crate::config::Config) -> Box<dyn Formatter> {
     if config.format.enabled {
         eprintln!("[DEBUG] Using DefaultFormatter");
-        Box::new(
-            DefaultFormatter::new(config.format.clone())
-                .with_skip_words(config.builtin.skip_words.clone()),
-        )
+        Box::new(DefaultFormatter::new(
+            config.format.clone(),
+            config.builtin.skip_words.clone(),
+        ))
     } else {
         eprintln!("[DEBUG] Using NullFormatter");
         Box::new(NullFormatter::new())
@@ -34,23 +34,13 @@ pub struct DefaultFormatter {
 }
 
 impl DefaultFormatter {
-    pub fn new(config: FormatConfig) -> Self {
-        Self {
-            config,
-            skip_words: crate::config::default_skip_words(),
-        }
-    }
-
-    pub fn with_skip_words(mut self, skip_words: Vec<String>) -> Self {
-        self.skip_words = skip_words;
-        self
+    pub fn new(config: FormatConfig, skip_words: Vec<String>) -> Self {
+        Self { config, skip_words }
     }
 
     /// Check if a word is a skip word that takes an argument
     fn is_skip_word(&self, word: &str) -> bool {
-        self.skip_words
-            .iter()
-            .any(|sw| sw.eq_ignore_ascii_case(word))
+        crate::config::is_skip_word(&self.skip_words, word)
     }
 }
 
@@ -562,7 +552,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ":   add   +  ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -575,7 +565,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -589,7 +579,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -603,7 +593,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -617,7 +607,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -630,7 +620,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": abs dup 0 < if negate then ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -641,7 +631,7 @@ mod tests {
     #[test]
     fn test_multiple_definitions() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -655,7 +645,7 @@ mod tests {
     #[test]
     fn test_comments_preserved() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = r"\ This is a comment
 : test ( a b -- c ) + ;";
@@ -671,7 +661,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -685,7 +675,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -698,7 +688,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 0 10 do i 2 mod 0 = if i . then loop ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -710,7 +700,7 @@ mod tests {
     #[test]
     fn test_format_document_returns_text_edit() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ":   square   dup   *   ;";
         let rope = Rope::from_str(source);
@@ -723,7 +713,7 @@ mod tests {
     #[test]
     fn test_stack_comment_on_declaration_line_default() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -737,7 +727,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -751,7 +741,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -766,7 +756,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = r": test \ inline comment
 dup ;";
@@ -778,7 +768,7 @@ dup ;";
     #[test]
     fn test_blank_line_between_definitions_default() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -795,7 +785,7 @@ dup ;";
             blank_line_between_definitions: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -806,7 +796,7 @@ dup ;";
     #[test]
     fn test_blank_line_three_definitions() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": a 1 ; : b 2 ; : c 3 ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -819,7 +809,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test\n  1 2 +\n  3 4 *\n  + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -833,7 +823,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": a\n  1\n  2 + ;\n: b\n  dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -847,7 +837,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test\n  \\ comment\n  1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -860,7 +850,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         // Test that comments, constants, variables outside definitions are preserved
         let source = "\\ File header comment\n10 CONSTANT MAX\n: double dup * ;\n\\ Footer comment";
@@ -879,7 +869,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = "VARIABLE counter\n100 CONSTANT LIMIT\n: increment counter @ 1 + counter ! ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -895,7 +885,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         // Multiple constants on one line should be split
         let source = "10 CONSTANT MAX 42 CONSTANT ANSWER";
@@ -913,7 +903,7 @@ dup ;";
             newline_before_paren_comments: false, // default
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( regular comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -928,7 +918,7 @@ dup ;";
             newline_before_line_comments: false, // default
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -943,7 +933,7 @@ dup ;";
             newline_before_paren_comments: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( regular paren comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -958,7 +948,7 @@ dup ;";
             newline_before_line_comments: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -974,7 +964,7 @@ dup ;";
             newline_before_line_comments: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 ( inline paren ) + \\ inline line\n 3 ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -990,7 +980,7 @@ dup ;";
             preserve_definition_newlines: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = "require foo.4th require bar.4th\n3 constant qux";
         let formatted = formatter.format_source(source).unwrap();
@@ -1006,7 +996,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = "require foo.4th\nrequire bar.4th\n3 constant qux";
         let formatted = formatter.format_source(source).unwrap();

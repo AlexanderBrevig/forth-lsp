@@ -83,7 +83,7 @@ pub fn check_undefined_words_from_tokens(
 
     // Check all word usages
     let mut in_string_literal = false;
-    let mut skip_next_tokens: usize = 0;
+    let mut skip_next_argument = false;
     for token in tokens {
         if let Token::Word(data) = token {
             let word_lower = data.value.to_lowercase();
@@ -104,21 +104,19 @@ pub fn check_undefined_words_from_tokens(
             if data.value.ends_with('"') {
                 in_string_literal = true;
                 defined_words.insert(word_lower.clone()); // Treat opener as known
+                skip_next_argument = false; // A string opener consumes any pending skip
                 continue;
             }
 
-            // Skip argument token following a skip/parsing word
-            if skip_next_tokens > 0 {
-                skip_next_tokens -= 1;
+            // Skip the argument word following a skip/parsing word
+            if skip_next_argument {
+                skip_next_argument = false;
                 continue;
             }
 
             // If this token is a skip word, mark the next argument token to be skipped
-            if skip_words
-                .iter()
-                .any(|sw| sw.eq_ignore_ascii_case(data.value))
-            {
-                skip_next_tokens = 1;
+            if crate::config::is_skip_word(skip_words, data.value) {
+                skip_next_argument = true;
                 continue;
             }
 
@@ -167,6 +165,12 @@ pub fn check_undefined_words_from_tokens(
                 tags: None,
                 data: None,
             });
+        } else if !in_string_literal {
+            // A non-Word token (number, comment, colon, ...) immediately
+            // following a skip word is that word's argument, or otherwise
+            // ends its line. Either way it consumes the pending skip so it
+            // can never leak onto a later, genuinely undefined word.
+            skip_next_argument = false;
         }
     }
 
@@ -917,6 +921,48 @@ mod tests {
     }
 
     #[test]
+    fn test_skip_word_does_not_leak_past_number_argument() {
+        // Regression: the skip counter used to decrement only on Word tokens,
+        // so a number between a skip word and a later word leaked the skip onto
+        // that word. Here `3` is require's argument; `realword` is a genuine
+        // undefined word and must still be flagged.
+        let rope = Rope::from_str("require 3 realword");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "expected realword to be flagged, got: {:?}",
+            diagnostics
+        );
+        assert!(
+            diagnostics[0].message.contains("realword"),
+            "expected diagnostic for realword, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn test_skip_word_does_not_leak_past_comment() {
+        // A comment between a skip word and a later word must not let the skip
+        // leak onto that word.
+        let rope = Rope::from_str("require \\ note\nrealword");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("realword")),
+            "expected realword to be flagged, got: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
     fn test_custom_skip_words_from_config() {
         let rope = Rope::from_str("custom-loader my-custom-file.fs");
         let index = DefinitionIndex::new();
@@ -927,7 +973,8 @@ mod tests {
 
         let source = rope.to_string();
         let tokens = Lexer::new(&source).parse();
-        let diagnostics = get_diagnostics_from_tokens(&tokens, &source, &rope, &index, &words, &config);
+        let diagnostics =
+            get_diagnostics_from_tokens(&tokens, &source, &rope, &index, &words, &config);
 
         assert_eq!(
             diagnostics.len(),
