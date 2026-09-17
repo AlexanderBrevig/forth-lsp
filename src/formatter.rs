@@ -13,11 +13,14 @@ pub trait Formatter {
     fn format_source(&self, source: &str) -> Result<String>;
 }
 
-/// Creates a formatter based on if FormatConfig.enabled is true
-pub fn create_formatter(config: FormatConfig) -> Box<dyn Formatter> {
-    if config.enabled {
+/// Creates a formatter based on if Config.format.enabled is true
+pub fn create_formatter(config: &crate::config::Config) -> Box<dyn Formatter> {
+    if config.format.enabled {
         eprintln!("[DEBUG] Using DefaultFormatter");
-        Box::new(DefaultFormatter::new(config))
+        Box::new(DefaultFormatter::new(
+            config.format.clone(),
+            config.builtin.skip_words.clone(),
+        ))
     } else {
         eprintln!("[DEBUG] Using NullFormatter");
         Box::new(NullFormatter::new())
@@ -27,11 +30,17 @@ pub fn create_formatter(config: FormatConfig) -> Box<dyn Formatter> {
 /// Formats Forth source code according to the provided configuration
 pub struct DefaultFormatter {
     config: FormatConfig,
+    skip_words: Vec<String>,
 }
 
 impl DefaultFormatter {
-    pub fn new(config: FormatConfig) -> Self {
-        Self { config }
+    pub fn new(config: FormatConfig, skip_words: Vec<String>) -> Self {
+        Self { config, skip_words }
+    }
+
+    /// Check if a word is a skip word that takes an argument
+    fn is_skip_word(&self, word: &str) -> bool {
+        crate::config::is_skip_word(&self.skip_words, word)
     }
 }
 
@@ -158,6 +167,7 @@ impl DefaultFormatter {
         token: &Token,
         output: &mut String,
         last_was_defining: &mut bool,
+        last_was_skip: &mut bool,
     ) {
         match token {
             Token::Comment(data) | Token::StackComment(data) => {
@@ -191,11 +201,17 @@ impl DefaultFormatter {
                 // (line comments always end lines, paren/stack comments get newlines for readability)
                 output.push('\n');
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Word(data) | Token::Number(data) => {
                 // Check if this is a defining word
                 let is_def_word = if let Token::Word(w) = token {
                     Self::is_defining_word(w.value)
+                } else {
+                    false
+                };
+                let is_skip = if let Token::Word(w) = token {
+                    self.is_skip_word(w.value)
                 } else {
                     false
                 };
@@ -205,26 +221,33 @@ impl DefaultFormatter {
                 }
                 output.push_str(data.value);
 
-                // If last token was a defining word, this is the name - add newline after it
-                if *last_was_defining {
+                // If last token was a defining word or skip word, this is the name/argument - add newline after it
+                if *last_was_defining || *last_was_skip {
                     output.push('\n');
                     *last_was_defining = false;
+                    *last_was_skip = false;
                 } else if is_def_word {
                     // Mark that next token will be the name
                     *last_was_defining = true;
+                } else if is_skip {
+                    // Mark that next token will be the argument
+                    *last_was_skip = true;
                 }
             }
             Token::Semicolon(_) => {
                 output.push_str(" ;");
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Illegal(_) | Token::Eof(_) => {
                 // Skip
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Colon(_) => {
                 // Should not be called for colon tokens
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
         }
     }
@@ -234,6 +257,7 @@ impl DefaultFormatter {
         let mut output = String::new();
         let mut i = 0;
         let mut last_was_defining = false;
+        let mut last_was_skip = false;
 
         while i < tokens.len() {
             match &tokens[i] {
@@ -241,12 +265,14 @@ impl DefaultFormatter {
                 Token::Colon(_) => {
                     i = self.format_preserved_definition(tokens, i, source, &mut output);
                     last_was_defining = false;
+                    last_was_skip = false;
                 }
                 _ => {
                     self.format_non_definition_token(
                         &tokens[i],
                         &mut output,
                         &mut last_was_defining,
+                        &mut last_was_skip,
                     );
                     i += 1;
                 }
@@ -271,6 +297,8 @@ impl DefaultFormatter {
         let mut is_first_word_after_colon = false;
         let mut just_printed_stack_comment = false;
         let mut awaiting_potential_stack_comment = false;
+        let mut last_was_defining = false;
+        let mut last_was_skip = false;
 
         let indent_str = if self.config.use_spaces {
             " ".repeat(self.config.indent_width)
@@ -294,6 +322,8 @@ impl DefaultFormatter {
                     prev_was_colon = true;
                     is_first_word_after_colon = true;
                     line_start = false;
+                    last_was_defining = false;
+                    last_was_skip = false;
 
                     if self.config.space_after_colon {
                         output.push(' ');
@@ -438,6 +468,22 @@ impl DefaultFormatter {
                     output.push_str(data.value);
                     prev_was_colon = false;
 
+                    // Handle defining words and skip words outside definitions
+                    if !in_definition {
+                        if last_was_defining || last_was_skip {
+                            output.push('\n');
+                            line_start = true;
+                            last_was_defining = false;
+                            last_was_skip = false;
+                        } else if let Token::Word(w) = token {
+                            if Self::is_defining_word(w.value) {
+                                last_was_defining = true;
+                            } else if self.is_skip_word(w.value) {
+                                last_was_skip = true;
+                            }
+                        }
+                    }
+
                     // After first word following colon (definition name)
                     if is_first_word_after_colon {
                         // Mark that we're waiting to see if a stack comment follows
@@ -506,7 +552,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ":   add   +  ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -519,7 +565,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -533,7 +579,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -547,7 +593,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -561,7 +607,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -574,7 +620,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": abs dup 0 < if negate then ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -585,7 +631,7 @@ mod tests {
     #[test]
     fn test_multiple_definitions() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -599,7 +645,7 @@ mod tests {
     #[test]
     fn test_comments_preserved() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = r"\ This is a comment
 : test ( a b -- c ) + ;";
@@ -615,7 +661,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -629,7 +675,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -642,7 +688,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 0 10 do i 2 mod 0 = if i . then loop ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -654,7 +700,7 @@ mod tests {
     #[test]
     fn test_format_document_returns_text_edit() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ":   square   dup   *   ;";
         let rope = Rope::from_str(source);
@@ -667,7 +713,7 @@ mod tests {
     #[test]
     fn test_stack_comment_on_declaration_line_default() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -681,7 +727,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -695,7 +741,7 @@ mod tests {
             indent_control_structures: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( a b -- c ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -710,7 +756,7 @@ mod tests {
             indent_control_structures: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = r": test \ inline comment
 dup ;";
@@ -722,7 +768,7 @@ dup ;";
     #[test]
     fn test_blank_line_between_definitions_default() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -739,7 +785,7 @@ dup ;";
             blank_line_between_definitions: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": square dup * ; : cube dup square * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -750,7 +796,7 @@ dup ;";
     #[test]
     fn test_blank_line_three_definitions() {
         let config = FormatConfig::default();
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": a 1 ; : b 2 ; : c 3 ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -763,7 +809,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test\n  1 2 +\n  3 4 *\n  + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -777,7 +823,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": a\n  1\n  2 + ;\n: b\n  dup * ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -791,7 +837,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test\n  \\ comment\n  1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -804,7 +850,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         // Test that comments, constants, variables outside definitions are preserved
         let source = "\\ File header comment\n10 CONSTANT MAX\n: double dup * ;\n\\ Footer comment";
@@ -823,7 +869,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = "VARIABLE counter\n100 CONSTANT LIMIT\n: increment counter @ 1 + counter ! ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -839,7 +885,7 @@ dup ;";
             preserve_definition_newlines: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         // Multiple constants on one line should be split
         let source = "10 CONSTANT MAX 42 CONSTANT ANSWER";
@@ -857,7 +903,7 @@ dup ;";
             newline_before_paren_comments: false, // default
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( regular comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -872,7 +918,7 @@ dup ;";
             newline_before_line_comments: false, // default
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -887,7 +933,7 @@ dup ;";
             newline_before_paren_comments: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": add ( regular paren comment ) + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -902,7 +948,7 @@ dup ;";
             newline_before_line_comments: true,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 \\ inline comment\n + ;";
         let formatted = formatter.format_source(source).unwrap();
@@ -918,12 +964,45 @@ dup ;";
             newline_before_line_comments: false,
             ..Default::default()
         };
-        let formatter = DefaultFormatter::new(config);
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
 
         let source = ": test 1 2 ( inline paren ) + \\ inline line\n 3 ;";
         let formatted = formatter.format_source(source).unwrap();
         // Should preserve inline comments even in preserve mode
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
+    }
+
+    #[test]
+    fn test_format_skip_words_on_separate_lines() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            preserve_definition_newlines: false,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
+
+        let source = "require foo.4th require bar.4th\n3 constant qux";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(
+            formatted,
+            "require foo.4th\nrequire bar.4th\n3 constant qux\n"
+        );
+    }
+
+    #[test]
+    fn test_format_require_preserved_newlines_mode() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config, crate::config::default_skip_words());
+
+        let source = "require foo.4th\nrequire bar.4th\n3 constant qux";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(
+            formatted,
+            "require foo.4th\nrequire bar.4th\n3 constant qux\n"
+        );
     }
 }

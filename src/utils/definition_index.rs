@@ -191,14 +191,7 @@ impl DefinitionIndex {
 
         if let Some(defs) = self.definitions.get(&word.to_lowercase()) {
             for (file_path_or_uri, range, _) in defs {
-                // Try parsing as URI first (file:// scheme), then fall back to file path
-                let uri = if file_path_or_uri.starts_with("file://") {
-                    file_path_or_uri.parse().ok()
-                } else {
-                    format!("file://{}", file_path_or_uri).parse().ok()
-                };
-
-                if let Some(uri) = uri {
+                if let Some(uri) = crate::utils::uri_helpers::path_str_to_uri(file_path_or_uri) {
                     locations.push(Location { uri, range: *range });
                 }
             }
@@ -221,14 +214,7 @@ impl DefinitionIndex {
 
         if let Some(refs) = self.references.get(&word.to_lowercase()) {
             for (file_path_or_uri, range) in refs {
-                // Try parsing as URI first (file:// scheme), then fall back to file path
-                let uri = if file_path_or_uri.starts_with("file://") {
-                    file_path_or_uri.parse().ok()
-                } else {
-                    format!("file://{}", file_path_or_uri).parse().ok()
-                };
-
-                if let Some(uri) = uri {
+                if let Some(uri) = crate::utils::uri_helpers::path_str_to_uri(file_path_or_uri) {
                     locations.push(Location { uri, range: *range });
                 }
             }
