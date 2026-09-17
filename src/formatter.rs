@@ -1,4 +1,4 @@
-use crate::config::FormatConfig;
+use crate::config::{BlankLinesConfig, FormatConfig};
 use anyhow::Result;
 use forth_lexer::{parser::Lexer, token::Token};
 use lsp_types::{Position, Range, TextEdit};
@@ -55,16 +55,131 @@ impl Formatter for DefaultFormatter {
         let tokens = lexer.parse();
 
         // Format tokens
-        let formatted = if self.config.preserve_definition_newlines {
+        let mut formatted = if self.config.preserve_definition_newlines {
             self.format_tokens_preserve_newlines(&tokens, source)
         } else {
-            self.format_tokens(&tokens)
+            self.format_tokens(&tokens, source)
         };
+
+        // Independent of the setting value, all blank lines in the end of file must be removed
+        // (but the file should end with newline character)
+        while formatted.ends_with(' ')
+            || formatted.ends_with('\t')
+            || formatted.ends_with('\r')
+            || formatted.ends_with('\n')
+        {
+            formatted.pop();
+        }
+        if !formatted.is_empty() {
+            formatted.push('\n');
+        }
+
         Ok(formatted)
     }
 }
 
 impl DefaultFormatter {
+    fn count_gap_blank_lines(gap: &str) -> usize {
+        let newlines = gap.chars().filter(|&c| c == '\n').count();
+        if newlines >= 2 {
+            newlines - 1
+        } else {
+            0
+        }
+    }
+
+    fn is_doc_comment_start(tokens: &[Token], source: &str, idx: usize) -> bool {
+        if !matches!(tokens[idx], Token::Comment(_) | Token::StackComment(_)) {
+            return false;
+        }
+        if idx > 0 && matches!(tokens[idx - 1], Token::Comment(_) | Token::StackComment(_)) {
+            let prev_gap = &source[tokens[idx - 1].get_data().end..tokens[idx].get_data().start];
+            if Self::count_gap_blank_lines(prev_gap) == 0 {
+                return false;
+            }
+        }
+        let mut curr = idx;
+        while curr < tokens.len() {
+            if curr + 1 >= tokens.len() {
+                return false;
+            }
+            let gap = &source[tokens[curr].get_data().end..tokens[curr + 1].get_data().start];
+            if Self::count_gap_blank_lines(gap) > 0 {
+                return false;
+            }
+            match &tokens[curr + 1] {
+                Token::Comment(_) | Token::StackComment(_) => {
+                    curr += 1;
+                }
+                Token::Colon(_) => {
+                    return true;
+                }
+                _ => {
+                    return false;
+                }
+            }
+        }
+        false
+    }
+
+    fn is_colon_preceded_by_doc_comments(tokens: &[Token], source: &str, colon_idx: usize) -> bool {
+        if colon_idx == 0 {
+            return false;
+        }
+        if !matches!(tokens[colon_idx - 1], Token::Comment(_) | Token::StackComment(_)) {
+            return false;
+        }
+        let gap = &source[tokens[colon_idx - 1].get_data().end..tokens[colon_idx].get_data().start];
+        Self::count_gap_blank_lines(gap) == 0
+    }
+
+    fn target_blank_lines_before_definition(
+        &self,
+        seen_first_definition: bool,
+        source_blank_lines: usize,
+    ) -> usize {
+        match self.config.blank_lines {
+            BlankLinesConfig::No => {
+                if seen_first_definition && self.config.blank_line_between_definitions {
+                    1
+                } else {
+                    0
+                }
+            }
+            BlankLinesConfig::Collapse => {
+                if (seen_first_definition && self.config.blank_line_between_definitions)
+                    || source_blank_lines > 0
+                {
+                    1
+                } else {
+                    0
+                }
+            }
+            BlankLinesConfig::Preserve => {
+                if seen_first_definition && self.config.blank_line_between_definitions {
+                    std::cmp::max(1, source_blank_lines)
+                } else {
+                    source_blank_lines
+                }
+            }
+        }
+    }
+
+    fn set_trailing_blank_lines(output: &mut String, count: usize) {
+        if output.is_empty() {
+            return;
+        }
+        while output.ends_with(' ') || output.ends_with('\t') {
+            output.pop();
+        }
+        while output.ends_with('\n') {
+            output.pop();
+        }
+        for _ in 0..=count {
+            output.push('\n');
+        }
+    }
+
     /// Format a colon definition while preserving its internal newlines
     fn format_preserved_definition(
         &self,
@@ -83,8 +198,6 @@ impl DefaultFormatter {
             "\t".to_string()
         };
 
-        self.force_blank_line_between_defns(output);
-
         // Find matching semicolon
         let mut semicolon_idx = colon_idx + 1;
         while semicolon_idx < tokens.len() {
@@ -95,34 +208,47 @@ impl DefaultFormatter {
         }
 
         if semicolon_idx < tokens.len() {
-            // Extract and preserve original text between : and ;
+            // Extract text between : and ;
             let semi_data = tokens[semicolon_idx].get_data();
             let def_text = &source[colon_data.start..semi_data.end];
 
-            // Indent each line
+            let mut consecutive_empty_lines = 0;
             for (line_idx, line) in def_text.lines().enumerate() {
-                if line_idx > 0 {
-                    output.push('\n');
-                    output.push_str(&indent_str);
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    if line_idx == 0 {
+                        continue;
+                    }
+                    consecutive_empty_lines += 1;
+                    match self.config.blank_lines {
+                        BlankLinesConfig::No => {
+                            // "The 'preserve_definition_newlines' option when true should not be applied to empty lines."
+                            // Skip empty lines
+                        }
+                        BlankLinesConfig::Collapse => {
+                            if consecutive_empty_lines == 1 {
+                                output.push('\n');
+                            }
+                        }
+                        BlankLinesConfig::Preserve => {
+                            output.push('\n');
+                        }
+                    }
+                } else {
+                    consecutive_empty_lines = 0;
+                    if line_idx > 0 {
+                        output.push('\n');
+                        output.push_str(&indent_str);
+                    }
+                    output.push_str(line.trim_start());
                 }
-                output.push_str(line.trim_start());
             }
-            self.force_blank_line_between_defns(output);
 
             semicolon_idx + 1
         } else {
             // No matching semicolon
             output.push(':');
             colon_idx + 1
-        }
-    }
-
-    fn force_blank_line_between_defns(&self, output: &mut String) {
-        while self.config.blank_line_between_definitions
-            && !output.is_empty()
-            && !output.ends_with("\n\n")
-        {
-            output.push('\n');
         }
     }
 
@@ -234,15 +360,82 @@ impl DefaultFormatter {
         let mut output = String::new();
         let mut i = 0;
         let mut last_was_defining = false;
+        let mut seen_first_definition = false;
 
         while i < tokens.len() {
             match &tokens[i] {
                 Token::Eof(_) => break,
                 Token::Colon(_) => {
+                    if Self::is_colon_preceded_by_doc_comments(tokens, source, i) {
+                        Self::set_trailing_blank_lines(&mut output, 0);
+                    } else {
+                        let source_blank_lines = if i > 0 && !output.is_empty() {
+                            let prev_end = tokens[i - 1].get_data().end;
+                            let gap = if tokens[i].get_data().start >= prev_end {
+                                &source[prev_end..tokens[i].get_data().start]
+                            } else {
+                                ""
+                            };
+                            Self::count_gap_blank_lines(gap)
+                        } else {
+                            0
+                        };
+                        let target = self.target_blank_lines_before_definition(
+                            seen_first_definition,
+                            source_blank_lines,
+                        );
+                        Self::set_trailing_blank_lines(&mut output, target);
+                    }
+
+                    seen_first_definition = true;
                     i = self.format_preserved_definition(tokens, i, source, &mut output);
                     last_was_defining = false;
                 }
                 _ => {
+                    if i > 0 && !output.is_empty() {
+                        let prev_end = tokens[i - 1].get_data().end;
+                        let curr_start = tokens[i].get_data().start;
+                        let gap = if curr_start >= prev_end {
+                            &source[prev_end..curr_start]
+                        } else {
+                            ""
+                        };
+                        let newlines = gap.chars().filter(|&c| c == '\n').count();
+
+                        if Self::is_doc_comment_start(tokens, source, i) {
+                            let source_blank_lines = Self::count_gap_blank_lines(gap);
+                            let force_blank = seen_first_definition || !output.trim().is_empty();
+                            let target = self.target_blank_lines_before_definition(
+                                force_blank,
+                                source_blank_lines,
+                            );
+                            Self::set_trailing_blank_lines(&mut output, target);
+                        } else if newlines > 0 {
+                            let in_doc_block = i > 0
+                                && matches!(tokens[i - 1], Token::Comment(_) | Token::StackComment(_))
+                                && matches!(tokens[i], Token::Comment(_) | Token::StackComment(_))
+                                && Self::count_gap_blank_lines(gap) == 0;
+
+                            if in_doc_block {
+                                Self::set_trailing_blank_lines(&mut output, 0);
+                            } else {
+                                let source_blank_lines = Self::count_gap_blank_lines(gap);
+                                let target = match self.config.blank_lines {
+                                    BlankLinesConfig::No => 0,
+                                    BlankLinesConfig::Collapse => {
+                                        if source_blank_lines > 0 {
+                                            1
+                                        } else {
+                                            0
+                                        }
+                                    }
+                                    BlankLinesConfig::Preserve => source_blank_lines,
+                                };
+                                Self::set_trailing_blank_lines(&mut output, target);
+                            }
+                        }
+                    }
+
                     self.format_non_definition_token(
                         &tokens[i],
                         &mut output,
@@ -253,16 +446,11 @@ impl DefaultFormatter {
             }
         }
 
-        // Ensure file ends with newline
-        if !output.ends_with('\n') {
-            output.push('\n');
-        }
-
         output
     }
 
     /// Format a list of tokens according to the configuration
-    fn format_tokens(&self, tokens: &[Token]) -> String {
+    fn format_tokens(&self, tokens: &[Token], source: &str) -> String {
         let mut output = String::new();
         let mut indent_level = 0;
         let mut in_definition = false;
@@ -271,6 +459,7 @@ impl DefaultFormatter {
         let mut is_first_word_after_colon = false;
         let mut just_printed_stack_comment = false;
         let mut awaiting_potential_stack_comment = false;
+        let mut seen_first_definition = false;
 
         let indent_str = if self.config.use_spaces {
             " ".repeat(self.config.indent_width)
@@ -278,12 +467,72 @@ impl DefaultFormatter {
             "\t".to_string()
         };
 
-        for token in tokens {
+        for (i, token) in tokens.iter().enumerate() {
+            if !in_definition && i > 0 && !output.is_empty() {
+                let prev_end = tokens[i - 1].get_data().end;
+                let curr_start = token.get_data().start;
+                let gap = if curr_start >= prev_end {
+                    &source[prev_end..curr_start]
+                } else {
+                    ""
+                };
+                let newlines = gap.chars().filter(|&c| c == '\n').count();
+
+                if Self::is_doc_comment_start(tokens, source, i) {
+                    let source_blank_lines = Self::count_gap_blank_lines(gap);
+                    let force_blank = seen_first_definition || !output.trim().is_empty();
+                    let target = self.target_blank_lines_before_definition(
+                        force_blank,
+                        source_blank_lines,
+                    );
+                    Self::set_trailing_blank_lines(&mut output, target);
+                    line_start = true;
+                } else if matches!(token, Token::Colon(_)) {
+                    if Self::is_colon_preceded_by_doc_comments(tokens, source, i) {
+                        Self::set_trailing_blank_lines(&mut output, 0);
+                        line_start = true;
+                    } else {
+                        let source_blank_lines = Self::count_gap_blank_lines(gap);
+                        let target = self.target_blank_lines_before_definition(
+                            seen_first_definition,
+                            source_blank_lines,
+                        );
+                        Self::set_trailing_blank_lines(&mut output, target);
+                        line_start = true;
+                    }
+                } else if newlines > 0 {
+                    let in_doc_block = i > 0
+                        && matches!(tokens[i - 1], Token::Comment(_) | Token::StackComment(_))
+                        && matches!(token, Token::Comment(_) | Token::StackComment(_))
+                        && Self::count_gap_blank_lines(gap) == 0;
+
+                    if in_doc_block {
+                        Self::set_trailing_blank_lines(&mut output, 0);
+                        line_start = true;
+                    } else {
+                        let source_blank_lines = Self::count_gap_blank_lines(gap);
+                        let target = match self.config.blank_lines {
+                            BlankLinesConfig::No => 0,
+                            BlankLinesConfig::Collapse => {
+                                if source_blank_lines > 0 {
+                                    1
+                                } else {
+                                    0
+                                }
+                            }
+                            BlankLinesConfig::Preserve => source_blank_lines,
+                        };
+                        Self::set_trailing_blank_lines(&mut output, target);
+                        line_start = true;
+                    }
+                }
+            }
+
             match token {
                 Token::Eof(_) => break,
 
                 Token::Colon(_) => {
-                    self.force_blank_line_between_defns(&mut output);
+                    seen_first_definition = true;
 
                     if !line_start {
                         output.push('\n');
@@ -768,7 +1017,7 @@ dup ;";
         let source = ": test\n  1 2 +\n  3 4 *\n  + ;";
         let formatted = formatter.format_source(source).unwrap();
         // Should preserve the newlines within the definition
-        assert_eq!(formatted, ": test\n  1 2 +\n  3 4 *\n  + ;\n\n");
+        assert_eq!(formatted, ": test\n  1 2 +\n  3 4 *\n  + ;\n");
     }
 
     #[test]
@@ -782,7 +1031,7 @@ dup ;";
         let source = ": a\n  1\n  2 + ;\n: b\n  dup * ;";
         let formatted = formatter.format_source(source).unwrap();
         // Should preserve newlines and add blank line between
-        assert_eq!(formatted, ": a\n  1\n  2 + ;\n\n: b\n  dup * ;\n\n");
+        assert_eq!(formatted, ": a\n  1\n  2 + ;\n\n: b\n  dup * ;\n");
     }
 
     #[test]
@@ -795,7 +1044,7 @@ dup ;";
 
         let source = ": test\n  \\ comment\n  1 2 + ;";
         let formatted = formatter.format_source(source).unwrap();
-        assert_eq!(formatted, ": test\n  \\ comment\n  1 2 + ;\n\n");
+        assert_eq!(formatted, ": test\n  \\ comment\n  1 2 + ;\n");
     }
 
     #[test]
@@ -926,4 +1175,223 @@ dup ;";
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
     }
+
+    #[test]
+    fn test_doc_comment_block_before_definition() {
+        let config = FormatConfig::default();
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": word1 1 ;\n\\ here comes\n\\ some comment block\n\\ documenting word\n: word2 2 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": word1\n  1 ;\n\n\\ here comes\n\\ some comment block\n\\ documenting word\n: word2\n  2 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_first_definition_doc_comment_no_blank_line() {
+        let config = FormatConfig::default();
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "\\ here comes\n\\ doc for first word\n: word1 1 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "\\ here comes\n\\ doc for first word\n: word1\n  1 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_first_definition_doc_comment_blank_line_when_not_first_line() {
+        let config = FormatConfig::default();
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "10 CONSTANT X\n\\ here comes\n\\ doc for first word\n: word1 1 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "10 CONSTANT X\n\n\\ here comes\n\\ doc for first word\n: word1\n  1 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_first_definition_doc_comment_blank_line_when_not_first_line_blank_lines_no() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::No,
+            blank_line_between_definitions: true,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "10 CONSTANT X\n\\ here comes\n\\ doc for first word\n: word1 1 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "10 CONSTANT X\n\n\\ here comes\n\\ doc for first word\n: word1\n  1 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_blank_lines_no() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::No,
+            blank_line_between_definitions: false,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "\\ Section 1\n\n\n\\ Section 2\n\n10 CONSTANT X\n\n: a 1 ;\n\n: b 2 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "\\ Section 1\n\\ Section 2\n10 CONSTANT X\n: a\n  1 ;\n: b\n  2 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_blank_lines_no_with_blank_line_between_definitions() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::No,
+            blank_line_between_definitions: true,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "\\ Section 1\n\n\n\\ Section 2\n\n: a 1 ;\n\n\\ doc for b\n: b 2 ;\n\n: c 3 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "\\ Section 1\n\\ Section 2\n: a\n  1 ;\n\n\\ doc for b\n: b\n  2 ;\n\n: c\n  3 ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_blank_lines_collapse_default() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::Collapse,
+            blank_line_between_definitions: false,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "\\ Section 1\n\n\n\n\\ Section 2\n\n10 CONSTANT X";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "\\ Section 1\n\n\\ Section 2\n\n10 CONSTANT X\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_blank_lines_preserve() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::Preserve,
+            blank_line_between_definitions: false,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "\\ Section 1\n\n\n\n\\ Section 2\n\n10 CONSTANT X";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = "\\ Section 1\n\n\n\n\\ Section 2\n\n10 CONSTANT X\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_preserve_definition_newlines_empty_lines_removed_when_no() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            blank_lines: BlankLinesConfig::No,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": test\n  1 2 +\n\n\n  3 4 *\n  + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": test\n  1 2 +\n  3 4 *\n  + ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_preserve_definition_newlines_empty_lines_collapsed_when_collapse() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            blank_lines: BlankLinesConfig::Collapse,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": test\n  1 2 +\n\n\n  3 4 *\n  + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": test\n  1 2 +\n\n  3 4 *\n  + ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_preserve_definition_newlines_empty_lines_kept_when_preserve() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            blank_lines: BlankLinesConfig::Preserve,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": test\n  1 2 +\n\n\n  3 4 *\n  + ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": test\n  1 2 +\n\n\n  3 4 *\n  + ;\n";
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn test_trailing_blank_lines_removed_at_eof() {
+        // Test with all three BlankLinesConfig variants
+        for variant in [
+            BlankLinesConfig::No,
+            BlankLinesConfig::Collapse,
+            BlankLinesConfig::Preserve,
+        ] {
+            let config = FormatConfig {
+                blank_lines: variant,
+                ..Default::default()
+            };
+            let formatter = DefaultFormatter::new(config);
+
+            let source = ": test 1 2 + ;\n\n\n\n\n";
+            let formatted = formatter.format_source(source).unwrap();
+            assert_eq!(
+                formatted,
+                ": test\n  1 2 + ;\n",
+                "Failed for blank_lines variant {:?}",
+                variant
+            );
+        }
+    }
+
+    #[test]
+    fn test_preserve_multiple_blank_lines_before_word_definition() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::Preserve,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": first 1 ;\n\n\n\n: second 2 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(formatted, ": first\n  1 ;\n\n\n\n: second\n  2 ;\n");
+    }
+
+    #[test]
+    fn test_preserve_multiple_blank_lines_before_doc_comment_block() {
+        let config = FormatConfig {
+            blank_lines: BlankLinesConfig::Preserve,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": first 1 ;\n\n\n\\ doc comment\n: second 2 ;";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(formatted, ": first\n  1 ;\n\n\n\\ doc comment\n: second\n  2 ;\n");
+    }
+
+    #[test]
+    fn test_preserve_multiple_blank_lines_between_definitions_preserve_newlines_mode() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            blank_lines: BlankLinesConfig::Preserve,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": first\n  1\n;\n\n\n: second\n  2\n;";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(formatted, ": first\n  1\n  ;\n\n\n: second\n  2\n  ;\n");
+    }
 }
+

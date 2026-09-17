@@ -82,6 +82,26 @@ impl WorkspaceConfig {
     }
 }
 
+/// Blank line handling option for formatting
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BlankLinesConfig {
+    No,
+    #[default]
+    Collapse,
+    Preserve,
+}
+
+impl std::fmt::Display for BlankLinesConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::No => write!(f, "no"),
+            Self::Collapse => write!(f, "collapse"),
+            Self::Preserve => write!(f, "preserve"),
+        }
+    }
+}
+
 /// Formatter configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FormatConfig {
@@ -129,6 +149,13 @@ pub struct FormatConfig {
     #[serde(default = "default_true")]
     pub blank_line_between_definitions: bool,
 
+    /// How to handle blank lines during formatting:
+    /// - "no": removes all empty lines
+    /// - "collapse": collapses multiple consecutive empty lines to a single empty line (default)
+    /// - "preserve": keeps all empty lines from original source
+    #[serde(default)]
+    pub blank_lines: BlankLinesConfig,
+
     /// Add newline before parenthetical comments `( comment )`
     /// When false (default): preserves original whitespace
     /// When true: forces newline before paren comments
@@ -155,6 +182,7 @@ impl Default for FormatConfig {
             stack_comment_on_declaration_line: default_true(),
             preserve_definition_newlines: false,
             blank_line_between_definitions: default_true(),
+            blank_lines: BlankLinesConfig::default(),
             newline_before_paren_comments: false,
             newline_before_line_comments: false,
         }
@@ -335,6 +363,7 @@ mod tests {
         assert!(!config.format.space_before_semicolon);
         assert_eq!(config.format.word_spacing, 1);
         assert!(config.format.indent_control_structures);
+        assert_eq!(config.format.blank_lines, BlankLinesConfig::Collapse);
         assert!(config.builtin.words.is_empty());
     }
 
@@ -348,6 +377,7 @@ mod tests {
             space_before_semicolon = true
             word_spacing = 2
             indent_control_structures = false
+            blank_lines = "no"
         "#;
 
         let config: Config = toml::from_str(toml_content).unwrap();
@@ -357,6 +387,24 @@ mod tests {
         assert!(config.format.space_before_semicolon);
         assert_eq!(config.format.word_spacing, 2);
         assert!(!config.format.indent_control_structures);
+        assert_eq!(config.format.blank_lines, BlankLinesConfig::No);
+    }
+
+    #[test]
+    fn test_parse_blank_lines_options() {
+        let toml_collapse = r#"
+            [format]
+            blank_lines = "collapse"
+        "#;
+        let config: Config = toml::from_str(toml_collapse).unwrap();
+        assert_eq!(config.format.blank_lines, BlankLinesConfig::Collapse);
+
+        let toml_preserve = r#"
+            [format]
+            blank_lines = "preserve"
+        "#;
+        let config: Config = toml::from_str(toml_preserve).unwrap();
+        assert_eq!(config.format.blank_lines, BlankLinesConfig::Preserve);
     }
 
     #[test]
