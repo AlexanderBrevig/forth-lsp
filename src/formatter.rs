@@ -271,6 +271,7 @@ impl DefaultFormatter {
         let mut is_first_word_after_colon = false;
         let mut just_printed_stack_comment = false;
         let mut awaiting_potential_stack_comment = false;
+        let mut just_printed_endcase = false;
 
         let indent_str = if self.config.use_spaces {
             " ".repeat(self.config.indent_width)
@@ -318,6 +319,7 @@ impl DefaultFormatter {
                     in_definition = false;
                     prev_was_colon = false;
                     line_start = true;
+                    just_printed_endcase = false;
                 }
 
                 Token::StackComment(data) => {
@@ -409,22 +411,40 @@ impl DefaultFormatter {
                     let is_control_mid = matches!(word_upper.as_str(), "ELSE");
                     let is_control_end = matches!(
                         word_upper.as_str(),
-                        "THEN" | "LOOP" | "+LOOP" | "UNTIL" | "REPEAT" | "ENDCASE" | "ENDOF"
+                        "THEN"
+                            | "LOOP"
+                            | "+LOOP"
+                            | "UNTIL"
+                            | "REPEAT"
+                            | "ENDCASE"
+                            | "ENDOF"
+                            | "AGAIN"
                     );
 
-                    // Add newline BEFORE control structures if indentation is enabled
-                    if self.config.indent_control_structures
-                        && in_definition
-                        && !line_start
-                        && !is_first_word_after_colon
-                        && (is_control_start || is_control_mid || is_control_end)
-                    {
+                    // If we just printed endcase and got a word/number instead of semicolon, add newline first
+                    if just_printed_endcase && self.config.indent_control_structures {
                         output.push('\n');
                         line_start = true;
+                        just_printed_endcase = false;
+                    }
 
+                    // Decrease indent for mid/end control structures and add newline before control structures
+                    if self.config.indent_control_structures
+                        && in_definition
+                        && !is_first_word_after_colon
+                    {
                         // Decrease indent for mid/end control structures
                         if is_control_mid || is_control_end {
                             indent_level = indent_level.saturating_sub(1);
+                        }
+
+                        // Add newline BEFORE control structures if indentation is enabled (except OF which stays on same line as value)
+                        if !line_start
+                            && word_upper != "OF"
+                            && (is_control_start || is_control_mid || is_control_end)
+                        {
+                            output.push('\n');
+                            line_start = true;
                         }
                     }
 
@@ -444,14 +464,18 @@ impl DefaultFormatter {
                         is_first_word_after_colon = false;
                         awaiting_potential_stack_comment = true;
                     } else {
-                        // Increase indent after control start/mid structures
-                        if self.config.indent_control_structures
-                            && in_definition
-                            && (is_control_start || is_control_mid)
-                        {
-                            indent_level += 1;
-                            output.push('\n');
-                            line_start = true;
+                        // Increase indent after control start/mid structures, or add newline after ENDOF / track ENDCASE
+                        if self.config.indent_control_structures && in_definition {
+                            if is_control_start || is_control_mid {
+                                indent_level += 1;
+                                output.push('\n');
+                                line_start = true;
+                            } else if word_upper == "ENDOF" {
+                                output.push('\n');
+                                line_start = true;
+                            } else if word_upper == "ENDCASE" {
+                                just_printed_endcase = true;
+                            }
                         }
                     }
                 }
@@ -925,5 +949,25 @@ dup ;";
         // Should preserve inline comments even in preserve mode
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
+    }
+
+    #[test]
+    fn test_case_statement_formatting() {
+        let config = FormatConfig {
+            indent_control_structures: true,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = ": foo case 1 of exit endof 2 of exit endof endcase drop ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": foo\n  case\n    1 of\n      exit\n    endof\n    2 of\n      exit\n    endof\n  endcase\n  drop ;\n";
+        assert_eq!(formatted, expected);
+
+        // now same but with ; immediately after endcase
+        let source = ": foo case 1 of exit endof 2 of exit endof endcase ;";
+        let formatted = formatter.format_source(source).unwrap();
+        let expected = ": foo\n  case\n    1 of\n      exit\n    endof\n    2 of\n      exit\n    endof\n  endcase ;\n";
+        assert_eq!(formatted, expected);
     }
 }
