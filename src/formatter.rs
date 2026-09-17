@@ -13,11 +13,14 @@ pub trait Formatter {
     fn format_source(&self, source: &str) -> Result<String>;
 }
 
-/// Creates a formatter based on if FormatConfig.enabled is true
-pub fn create_formatter(config: FormatConfig) -> Box<dyn Formatter> {
-    if config.enabled {
+/// Creates a formatter based on if Config.format.enabled is true
+pub fn create_formatter(config: &crate::config::Config) -> Box<dyn Formatter> {
+    if config.format.enabled {
         eprintln!("[DEBUG] Using DefaultFormatter");
-        Box::new(DefaultFormatter::new(config))
+        Box::new(
+            DefaultFormatter::new(config.format.clone())
+                .with_skip_words(config.builtin.skip_words.clone()),
+        )
     } else {
         eprintln!("[DEBUG] Using NullFormatter");
         Box::new(NullFormatter::new())
@@ -27,11 +30,27 @@ pub fn create_formatter(config: FormatConfig) -> Box<dyn Formatter> {
 /// Formats Forth source code according to the provided configuration
 pub struct DefaultFormatter {
     config: FormatConfig,
+    skip_words: Vec<String>,
 }
 
 impl DefaultFormatter {
     pub fn new(config: FormatConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            skip_words: crate::config::default_skip_words(),
+        }
+    }
+
+    pub fn with_skip_words(mut self, skip_words: Vec<String>) -> Self {
+        self.skip_words = skip_words;
+        self
+    }
+
+    /// Check if a word is a skip word that takes an argument
+    fn is_skip_word(&self, word: &str) -> bool {
+        self.skip_words
+            .iter()
+            .any(|sw| sw.eq_ignore_ascii_case(word))
     }
 }
 
@@ -158,6 +177,7 @@ impl DefaultFormatter {
         token: &Token,
         output: &mut String,
         last_was_defining: &mut bool,
+        last_was_skip: &mut bool,
     ) {
         match token {
             Token::Comment(data) | Token::StackComment(data) => {
@@ -191,11 +211,17 @@ impl DefaultFormatter {
                 // (line comments always end lines, paren/stack comments get newlines for readability)
                 output.push('\n');
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Word(data) | Token::Number(data) => {
                 // Check if this is a defining word
                 let is_def_word = if let Token::Word(w) = token {
                     Self::is_defining_word(w.value)
+                } else {
+                    false
+                };
+                let is_skip = if let Token::Word(w) = token {
+                    self.is_skip_word(w.value)
                 } else {
                     false
                 };
@@ -205,26 +231,33 @@ impl DefaultFormatter {
                 }
                 output.push_str(data.value);
 
-                // If last token was a defining word, this is the name - add newline after it
-                if *last_was_defining {
+                // If last token was a defining word or skip word, this is the name/argument - add newline after it
+                if *last_was_defining || *last_was_skip {
                     output.push('\n');
                     *last_was_defining = false;
+                    *last_was_skip = false;
                 } else if is_def_word {
                     // Mark that next token will be the name
                     *last_was_defining = true;
+                } else if is_skip {
+                    // Mark that next token will be the argument
+                    *last_was_skip = true;
                 }
             }
             Token::Semicolon(_) => {
                 output.push_str(" ;");
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Illegal(_) | Token::Eof(_) => {
                 // Skip
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
             Token::Colon(_) => {
                 // Should not be called for colon tokens
                 *last_was_defining = false;
+                *last_was_skip = false;
             }
         }
     }
@@ -234,6 +267,7 @@ impl DefaultFormatter {
         let mut output = String::new();
         let mut i = 0;
         let mut last_was_defining = false;
+        let mut last_was_skip = false;
 
         while i < tokens.len() {
             match &tokens[i] {
@@ -241,12 +275,14 @@ impl DefaultFormatter {
                 Token::Colon(_) => {
                     i = self.format_preserved_definition(tokens, i, source, &mut output);
                     last_was_defining = false;
+                    last_was_skip = false;
                 }
                 _ => {
                     self.format_non_definition_token(
                         &tokens[i],
                         &mut output,
                         &mut last_was_defining,
+                        &mut last_was_skip,
                     );
                     i += 1;
                 }
@@ -271,6 +307,8 @@ impl DefaultFormatter {
         let mut is_first_word_after_colon = false;
         let mut just_printed_stack_comment = false;
         let mut awaiting_potential_stack_comment = false;
+        let mut last_was_defining = false;
+        let mut last_was_skip = false;
 
         let indent_str = if self.config.use_spaces {
             " ".repeat(self.config.indent_width)
@@ -294,6 +332,8 @@ impl DefaultFormatter {
                     prev_was_colon = true;
                     is_first_word_after_colon = true;
                     line_start = false;
+                    last_was_defining = false;
+                    last_was_skip = false;
 
                     if self.config.space_after_colon {
                         output.push(' ');
@@ -437,6 +477,22 @@ impl DefaultFormatter {
 
                     output.push_str(data.value);
                     prev_was_colon = false;
+
+                    // Handle defining words and skip words outside definitions
+                    if !in_definition {
+                        if last_was_defining || last_was_skip {
+                            output.push('\n');
+                            line_start = true;
+                            last_was_defining = false;
+                            last_was_skip = false;
+                        } else if let Token::Word(w) = token {
+                            if Self::is_defining_word(w.value) {
+                                last_was_defining = true;
+                            } else if self.is_skip_word(w.value) {
+                                last_was_skip = true;
+                            }
+                        }
+                    }
 
                     // After first word following colon (definition name)
                     if is_first_word_after_colon {
@@ -925,5 +981,38 @@ dup ;";
         // Should preserve inline comments even in preserve mode
         assert!(formatted.contains("( inline paren )"));
         assert!(formatted.contains("\\ inline line"));
+    }
+
+    #[test]
+    fn test_format_skip_words_on_separate_lines() {
+        let config = FormatConfig {
+            indent_control_structures: false,
+            preserve_definition_newlines: false,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "require foo.4th require bar.4th\n3 constant qux";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(
+            formatted,
+            "require foo.4th\nrequire bar.4th\n3 constant qux\n"
+        );
+    }
+
+    #[test]
+    fn test_format_require_preserved_newlines_mode() {
+        let config = FormatConfig {
+            preserve_definition_newlines: true,
+            ..Default::default()
+        };
+        let formatter = DefaultFormatter::new(config);
+
+        let source = "require foo.4th\nrequire bar.4th\n3 constant qux";
+        let formatted = formatter.format_source(source).unwrap();
+        assert_eq!(
+            formatted,
+            "require foo.4th\nrequire bar.4th\n3 constant qux\n"
+        );
     }
 }

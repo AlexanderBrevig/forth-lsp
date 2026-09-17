@@ -1,4 +1,5 @@
 #[allow(unused_imports)]
+use crate::config::Config;
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
 use crate::utils::diagnostics::{get_diagnostics_from_tokens, publish_diagnostics};
@@ -18,6 +19,7 @@ pub fn handle_did_open_text_document(
     files: &mut HashMap<String, Rope>,
     def_index: &mut DefinitionIndex,
     builtin_words: &Words,
+    config: &Config,
 ) -> Result<()> {
     match cast_notification::<lsp_types::notification::DidOpenTextDocument>(notification.clone()) {
         Ok(params) => {
@@ -33,7 +35,7 @@ pub fn handle_did_open_text_document(
                 def_index.update_file_from_tokens(&file_uri, &tokens, &rope);
 
                 let diagnostics =
-                    get_diagnostics_from_tokens(&tokens, &source, &rope, def_index, builtin_words);
+                    get_diagnostics_from_tokens(&tokens, &source, &rope, def_index, builtin_words, config);
                 publish_diagnostics(
                     connection,
                     params.text_document.uri.clone(),
