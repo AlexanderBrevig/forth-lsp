@@ -1,3 +1,4 @@
+mod cli;
 mod config;
 mod error;
 mod formatter;
@@ -5,6 +6,7 @@ mod prelude;
 mod utils;
 mod words;
 
+use crate::cli::Cli;
 use crate::config::{Config, WorkspaceConfig};
 use crate::prelude::*;
 use crate::utils::definition_index::DefinitionIndex;
@@ -26,6 +28,7 @@ use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
 use crate::utils::server_capabilities::forth_lsp_capabilities;
 use crate::utils::uri_helpers::{path_str_to_uri, uri_to_path};
 use crate::words::Words;
+use clap::Parser;
 
 use std::collections::HashMap;
 use std::fs;
@@ -36,6 +39,12 @@ use lsp_types::InitializeParams;
 use ropey::Rope;
 
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+    if cli.version {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Note that  we must have our logging only write out to stderr.
     eprintln!("starting generic LSP server");
 
