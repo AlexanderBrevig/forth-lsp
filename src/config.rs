@@ -205,7 +205,7 @@ pub struct CustomWord {
 }
 
 /// Custom builtin words configuration
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BuiltinConfig {
     /// Additional builtin words specific to the user's Forth implementation
     /// Supports both simple string format and detailed metadata format
@@ -217,6 +217,21 @@ pub struct BuiltinConfig {
     /// Paths are relative to workspace root or absolute
     #[serde(default)]
     pub word_files: Vec<String>,
+
+    /// Words that consume the following token as an argument (e.g. `require`).
+    /// The token following these words will not be flagged as an undefined word.
+    #[serde(default = "default_skip_words")]
+    pub skip_words: Vec<String>,
+}
+
+impl Default for BuiltinConfig {
+    fn default() -> Self {
+        Self {
+            words: Vec::new(),
+            word_files: Vec::new(),
+            skip_words: default_skip_words(),
+        }
+    }
 }
 
 impl BuiltinConfig {
@@ -317,6 +332,22 @@ fn default_workspace_exclude() -> Vec<String> {
         .collect()
 }
 
+/// Words whose immediate subsequent argument token is skipped in diagnostics.
+pub fn default_skip_words() -> Vec<String> {
+    ["require", "include", "needs"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Returns true if `word` is one of `skip_words` (case-insensitive).
+///
+/// Shared by the diagnostics checker and the formatter so the two stay in
+/// lockstep on what counts as a skip/parsing word.
+pub fn is_skip_word(skip_words: &[String], word: &str) -> bool {
+    skip_words.iter().any(|sw| sw.eq_ignore_ascii_case(word))
+}
+
 impl Config {
     /// Load configuration from a TOML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
@@ -365,6 +396,24 @@ mod tests {
         assert!(config.format.indent_control_structures);
         assert_eq!(config.format.blank_lines, BlankLinesConfig::Collapse);
         assert!(config.builtin.words.is_empty());
+        assert_eq!(
+            config.builtin.skip_words,
+            vec!["require", "include", "needs"]
+        );
+    }
+
+    #[test]
+    fn test_parse_skip_words_config() {
+        let toml_content = r#"
+            [builtin]
+            skip_words = ["require", "include", "fload", "my-import"]
+        "#;
+
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(
+            config.builtin.skip_words,
+            vec!["require", "include", "fload", "my-import"]
+        );
     }
 
     #[test]
@@ -560,6 +609,7 @@ mod tests {
         let config = BuiltinConfig {
             words: vec![],
             word_files: vec!["test.words".to_string()],
+            ..Default::default()
         };
 
         let words = config.load_words_from_files(dir.path().to_str().unwrap());
@@ -585,6 +635,7 @@ mod tests {
         let config = BuiltinConfig {
             words: vec![],
             word_files: vec![words_path.to_str().unwrap().to_string()],
+            ..Default::default()
         };
 
         // workspace_root doesn't matter for absolute paths
@@ -599,6 +650,7 @@ mod tests {
         let config = BuiltinConfig {
             words: vec![],
             word_files: vec!["nonexistent.words".to_string()],
+            ..Default::default()
         };
 
         let words = config.load_words_from_files("/tmp");
@@ -702,6 +754,7 @@ mod tests {
                 description: Some("An inline word".to_string()),
             }],
             word_files: vec!["extra.words".to_string()],
+            ..Default::default()
         };
 
         let static_words = config.to_static_words(Some(dir.path().to_str().unwrap()));

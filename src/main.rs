@@ -24,7 +24,7 @@ use crate::utils::handlers::request_semantic_tokens::handle_semantic_tokens_full
 use crate::utils::handlers::request_signature_help::handle_signature_help;
 use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
 use crate::utils::server_capabilities::forth_lsp_capabilities;
-use crate::utils::uri_helpers::uri_to_path;
+use crate::utils::uri_helpers::{path_str_to_uri, uri_to_path};
 use crate::words::Words;
 
 use std::collections::HashMap;
@@ -150,6 +150,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     &mut files,
                     &mut def_index,
                     &data,
+                    &config,
                 )
                 .is_ok()
                 {
@@ -161,6 +162,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     &mut files,
                     &mut def_index,
                     &data,
+                    &config,
                 )
                 .is_ok()
                 {
@@ -172,6 +174,7 @@ fn main_loop(connection: Connection, params: serde_json::Value) -> Result<()> {
                     &mut files,
                     &mut def_index,
                     &data,
+                    &config,
                 )
                 .is_ok()
                 {
@@ -207,7 +210,9 @@ fn load_dir(
                     let content = String::from_utf8_lossy(&raw_content);
                     let rope = Rope::from_str(&content);
                     // Convert path to URI to match DidOpen/DidChange format
-                    let file_uri = format!("file://{}", entry);
+                    let file_uri = path_str_to_uri(entry)
+                        .map(|u| u.to_string())
+                        .unwrap_or_else(|| format!("file://{}", entry));
                     files.insert(file_uri, rope);
                 }
             }

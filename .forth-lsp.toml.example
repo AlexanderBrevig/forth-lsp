@@ -51,6 +51,16 @@ blank_lines = "collapse"
 # Additional builtin words specific to your Forth implementation
 # These words will be recognized as valid by the LSP and shown in hover/completion
 
+# Words that consume the following whitespace-separated token as an argument (e.g. filename).
+# When specified, the token immediately following any of these words will be skipped and
+# not flagged as an undefined word.
+# Defaults to ["require", "include", "needs"] if omitted.
+#
+# NOTE: this key belongs to the [builtin] table, so it must stay ABOVE the
+# [[builtin.words]] array-of-tables below. If moved underneath, TOML would
+# read it as a field of the last word entry instead and silently ignore it.
+# skip_words = ["require", "include", "needs", "fload"]
+
 # Simple format (word name only)
 [[builtin.words]]
 word = "SIMPLEWORD"
@@ -60,3 +70,4 @@ word = "SIMPLEWORD"
 word = "LOADFROM"
 stack = "( addr -- )"
 description = "Loads data from specified address"
+

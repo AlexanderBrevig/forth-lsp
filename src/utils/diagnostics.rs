@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::prelude::*;
 use crate::utils::data_to_position::to_line_char;
 use crate::utils::definition_helpers::find_colon_definitions;
@@ -17,15 +18,21 @@ pub fn check_undefined_words_from_tokens(
     rope: &Rope,
     def_index: &DefinitionIndex,
     builtin_words: &Words,
+    skip_words: &[String],
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
 
-    // Build set of all defined words (built-in + user-defined)
+    // Build set of all defined words (built-in + user-defined + skip words)
     let mut defined_words = HashSet::new();
 
     // Add built-in words
     for word in &builtin_words.words {
         defined_words.insert(word.token.to_lowercase());
+    }
+
+    // Add skip words (e.g. require, include) so the word itself is recognized as valid
+    for word in skip_words {
+        defined_words.insert(word.to_lowercase());
     }
 
     // Add user-defined words
@@ -76,6 +83,7 @@ pub fn check_undefined_words_from_tokens(
 
     // Check all word usages
     let mut in_string_literal = false;
+    let mut skip_next_argument = false;
     for token in tokens {
         if let Token::Word(data) = token {
             let word_lower = data.value.to_lowercase();
@@ -96,6 +104,19 @@ pub fn check_undefined_words_from_tokens(
             if data.value.ends_with('"') {
                 in_string_literal = true;
                 defined_words.insert(word_lower.clone()); // Treat opener as known
+                skip_next_argument = false; // A string opener consumes any pending skip
+                continue;
+            }
+
+            // Skip the argument word following a skip/parsing word
+            if skip_next_argument {
+                skip_next_argument = false;
+                continue;
+            }
+
+            // If this token is a skip word, mark the next argument token to be skipped
+            if crate::config::is_skip_word(skip_words, data.value) {
+                skip_next_argument = true;
                 continue;
             }
 
@@ -144,6 +165,12 @@ pub fn check_undefined_words_from_tokens(
                 tags: None,
                 data: None,
             });
+        } else if !in_string_literal {
+            // A non-Word token (number, comment, colon, ...) immediately
+            // following a skip word is that word's argument, or otherwise
+            // ends its line. Either way it consumes the pending skip so it
+            // can never leak onto a later, genuinely undefined word.
+            skip_next_argument = false;
         }
     }
 
@@ -296,6 +323,7 @@ pub fn get_diagnostics_from_tokens(
     rope: &Rope,
     def_index: &DefinitionIndex,
     builtin_words: &Words,
+    config: &Config,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     diagnostics.extend(check_undefined_words_from_tokens(
@@ -303,6 +331,7 @@ pub fn get_diagnostics_from_tokens(
         rope,
         def_index,
         builtin_words,
+        &config.builtin.skip_words,
     ));
     diagnostics.extend(check_unclosed_definitions_from_tokens(tokens, rope));
     diagnostics.extend(check_unmatched_delimiters_from_source(source, rope));
@@ -351,7 +380,14 @@ mod tests {
     ) -> Vec<Diagnostic> {
         let source = rope.to_string();
         let tokens = Lexer::new(&source).parse();
-        check_undefined_words_from_tokens(&tokens, rope, def_index, builtin_words)
+        let config = Config::default();
+        check_undefined_words_from_tokens(
+            &tokens,
+            rope,
+            def_index,
+            builtin_words,
+            &config.builtin.skip_words,
+        )
     }
 
     fn get_diagnostics(
@@ -361,7 +397,8 @@ mod tests {
     ) -> Vec<Diagnostic> {
         let source = rope.to_string();
         let tokens = Lexer::new(&source).parse();
-        get_diagnostics_from_tokens(&tokens, &source, rope, def_index, builtin_words)
+        let config = Config::default();
+        get_diagnostics_from_tokens(&tokens, &source, rope, def_index, builtin_words, &config)
     }
 
     #[test]
@@ -844,5 +881,106 @@ mod tests {
         index.update_file(&file_uri, &rope);
         let words = Words::default();
         let _ = get_diagnostics(&rope, &index, &words);
+    }
+
+    #[test]
+    fn test_require_filename_argument_not_flagged() {
+        let rope = Rope::from_str("require some-filename\n: test 1 + ;");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Neither 'require' nor 'some-filename' should be flagged as undefined: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn test_skip_words_argument_skipped_but_subsequent_undefined_word_flagged() {
+        let rope = Rope::from_str("require some-filename undefinedword");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "Expected exactly 1 diagnostic for undefinedword, got: {:?}",
+            diagnostics
+        );
+        assert!(
+            diagnostics[0].message.contains("undefinedword"),
+            "Expected diagnostic to be for undefinedword, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn test_skip_word_does_not_leak_past_number_argument() {
+        // Regression: the skip counter used to decrement only on Word tokens,
+        // so a number between a skip word and a later word leaked the skip onto
+        // that word. Here `3` is require's argument; `realword` is a genuine
+        // undefined word and must still be flagged.
+        let rope = Rope::from_str("require 3 realword");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "expected realword to be flagged, got: {:?}",
+            diagnostics
+        );
+        assert!(
+            diagnostics[0].message.contains("realword"),
+            "expected diagnostic for realword, got: {}",
+            diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn test_skip_word_does_not_leak_past_comment() {
+        // A comment between a skip word and a later word must not let the skip
+        // leak onto that word.
+        let rope = Rope::from_str("require \\ note\nrealword");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let diagnostics = get_diagnostics(&rope, &index, &words);
+
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("realword")),
+            "expected realword to be flagged, got: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn test_custom_skip_words_from_config() {
+        let rope = Rope::from_str("custom-loader my-custom-file.fs");
+        let index = DefinitionIndex::new();
+        let words = Words::default();
+
+        let mut config = Config::default();
+        config.builtin.skip_words.push("custom-loader".to_string());
+
+        let source = rope.to_string();
+        let tokens = Lexer::new(&source).parse();
+        let diagnostics =
+            get_diagnostics_from_tokens(&tokens, &source, &rope, &index, &words, &config);
+
+        assert_eq!(
+            diagnostics.len(),
+            0,
+            "Custom skip word and its argument should not be flagged: {:?}",
+            diagnostics
+        );
     }
 }
