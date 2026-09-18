@@ -92,16 +92,6 @@ pub enum BlankLinesConfig {
     Preserve,
 }
 
-impl std::fmt::Display for BlankLinesConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::No => write!(f, "no"),
-            Self::Collapse => write!(f, "collapse"),
-            Self::Preserve => write!(f, "preserve"),
-        }
-    }
-}
-
 /// Formatter configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FormatConfig {

@@ -93,12 +93,23 @@ impl DefaultFormatter {
         if newlines >= 2 { newlines - 1 } else { 0 }
     }
 
+    /// Source text between token `i - 1` and token `i` ("" if the ranges overlap)
+    fn token_gap<'a>(tokens: &[Token], source: &'a str, i: usize) -> &'a str {
+        let prev_end = tokens[i - 1].get_data().end;
+        let curr_start = tokens[i].get_data().start;
+        if curr_start >= prev_end {
+            &source[prev_end..curr_start]
+        } else {
+            ""
+        }
+    }
+
     fn is_doc_comment_start(tokens: &[Token], source: &str, idx: usize) -> bool {
         if !matches!(tokens[idx], Token::Comment(_) | Token::StackComment(_)) {
             return false;
         }
         if idx > 0 && matches!(tokens[idx - 1], Token::Comment(_) | Token::StackComment(_)) {
-            let prev_gap = &source[tokens[idx - 1].get_data().end..tokens[idx].get_data().start];
+            let prev_gap = Self::token_gap(tokens, source, idx);
             if Self::count_gap_blank_lines(prev_gap) == 0 {
                 return false;
             }
@@ -108,7 +119,7 @@ impl DefaultFormatter {
             if curr + 1 >= tokens.len() {
                 return false;
             }
-            let gap = &source[tokens[curr].get_data().end..tokens[curr + 1].get_data().start];
+            let gap = Self::token_gap(tokens, source, curr + 1);
             if Self::count_gap_blank_lines(gap) > 0 {
                 return false;
             }
@@ -137,7 +148,7 @@ impl DefaultFormatter {
         ) {
             return false;
         }
-        let gap = &source[tokens[colon_idx - 1].get_data().end..tokens[colon_idx].get_data().start];
+        let gap = Self::token_gap(tokens, source, colon_idx);
         Self::count_gap_blank_lines(gap) == 0
     }
 
@@ -186,6 +197,53 @@ impl DefaultFormatter {
         for _ in 0..=count {
             output.push('\n');
         }
+    }
+
+    /// Adjust the trailing blank lines in `output` based on the source gap
+    /// before token `i`, honoring the `blank_lines` setting. Returns true if
+    /// the adjustment ran, i.e. `output` now ends at a line start.
+    fn apply_gap_blank_lines(
+        &self,
+        tokens: &[Token],
+        source: &str,
+        i: usize,
+        seen_first_definition: bool,
+        output: &mut String,
+    ) -> bool {
+        if i == 0 || output.is_empty() {
+            return false;
+        }
+        let gap = Self::token_gap(tokens, source, i);
+        let newlines = gap.chars().filter(|&c| c == '\n').count();
+        let source_blank_lines = Self::count_gap_blank_lines(gap);
+
+        let target = if Self::is_doc_comment_start(tokens, source, i) {
+            let force_blank = seen_first_definition || !output.trim().is_empty();
+            self.target_blank_lines_before_definition(force_blank, source_blank_lines)
+        } else if matches!(tokens[i], Token::Colon(_)) {
+            if Self::is_colon_preceded_by_doc_comments(tokens, source, i) {
+                0
+            } else {
+                self.target_blank_lines_before_definition(seen_first_definition, source_blank_lines)
+            }
+        } else if newlines > 0 {
+            let in_doc_block = matches!(tokens[i - 1], Token::Comment(_) | Token::StackComment(_))
+                && matches!(tokens[i], Token::Comment(_) | Token::StackComment(_))
+                && source_blank_lines == 0;
+            if in_doc_block {
+                0
+            } else {
+                match self.config.blank_lines {
+                    BlankLinesConfig::No => 0,
+                    BlankLinesConfig::Collapse => usize::from(source_blank_lines > 0),
+                    BlankLinesConfig::Preserve => source_blank_lines,
+                }
+            }
+        } else {
+            return false;
+        };
+        Self::set_trailing_blank_lines(output, target);
+        true
     }
 
     /// Format a colon definition while preserving its internal newlines
@@ -389,26 +447,13 @@ impl DefaultFormatter {
             match &tokens[i] {
                 Token::Eof(_) => break,
                 Token::Colon(_) => {
-                    if Self::is_colon_preceded_by_doc_comments(tokens, source, i) {
-                        Self::set_trailing_blank_lines(&mut output, 0);
-                    } else {
-                        let source_blank_lines = if i > 0 && !output.is_empty() {
-                            let prev_end = tokens[i - 1].get_data().end;
-                            let gap = if tokens[i].get_data().start >= prev_end {
-                                &source[prev_end..tokens[i].get_data().start]
-                            } else {
-                                ""
-                            };
-                            Self::count_gap_blank_lines(gap)
-                        } else {
-                            0
-                        };
-                        let target = self.target_blank_lines_before_definition(
-                            seen_first_definition,
-                            source_blank_lines,
-                        );
-                        Self::set_trailing_blank_lines(&mut output, target);
-                    }
+                    self.apply_gap_blank_lines(
+                        tokens,
+                        source,
+                        i,
+                        seen_first_definition,
+                        &mut output,
+                    );
 
                     seen_first_definition = true;
                     i = self.format_preserved_definition(tokens, i, source, &mut output);
@@ -416,52 +461,13 @@ impl DefaultFormatter {
                     last_was_skip = false;
                 }
                 _ => {
-                    if i > 0 && !output.is_empty() {
-                        let prev_end = tokens[i - 1].get_data().end;
-                        let curr_start = tokens[i].get_data().start;
-                        let gap = if curr_start >= prev_end {
-                            &source[prev_end..curr_start]
-                        } else {
-                            ""
-                        };
-                        let newlines = gap.chars().filter(|&c| c == '\n').count();
-
-                        if Self::is_doc_comment_start(tokens, source, i) {
-                            let source_blank_lines = Self::count_gap_blank_lines(gap);
-                            let force_blank = seen_first_definition || !output.trim().is_empty();
-                            let target = self.target_blank_lines_before_definition(
-                                force_blank,
-                                source_blank_lines,
-                            );
-                            Self::set_trailing_blank_lines(&mut output, target);
-                        } else if newlines > 0 {
-                            let in_doc_block = i > 0
-                                && matches!(
-                                    tokens[i - 1],
-                                    Token::Comment(_) | Token::StackComment(_)
-                                )
-                                && matches!(tokens[i], Token::Comment(_) | Token::StackComment(_))
-                                && Self::count_gap_blank_lines(gap) == 0;
-
-                            if in_doc_block {
-                                Self::set_trailing_blank_lines(&mut output, 0);
-                            } else {
-                                let source_blank_lines = Self::count_gap_blank_lines(gap);
-                                let target = match self.config.blank_lines {
-                                    BlankLinesConfig::No => 0,
-                                    BlankLinesConfig::Collapse => {
-                                        if source_blank_lines > 0 {
-                                            1
-                                        } else {
-                                            0
-                                        }
-                                    }
-                                    BlankLinesConfig::Preserve => source_blank_lines,
-                                };
-                                Self::set_trailing_blank_lines(&mut output, target);
-                            }
-                        }
-                    }
+                    self.apply_gap_blank_lines(
+                        tokens,
+                        source,
+                        i,
+                        seen_first_definition,
+                        &mut output,
+                    );
 
                     self.format_non_definition_token(
                         &tokens[i],
@@ -499,62 +505,10 @@ impl DefaultFormatter {
         };
 
         for (i, token) in tokens.iter().enumerate() {
-            if !in_definition && i > 0 && !output.is_empty() {
-                let prev_end = tokens[i - 1].get_data().end;
-                let curr_start = token.get_data().start;
-                let gap = if curr_start >= prev_end {
-                    &source[prev_end..curr_start]
-                } else {
-                    ""
-                };
-                let newlines = gap.chars().filter(|&c| c == '\n').count();
-
-                if Self::is_doc_comment_start(tokens, source, i) {
-                    let source_blank_lines = Self::count_gap_blank_lines(gap);
-                    let force_blank = seen_first_definition || !output.trim().is_empty();
-                    let target =
-                        self.target_blank_lines_before_definition(force_blank, source_blank_lines);
-                    Self::set_trailing_blank_lines(&mut output, target);
-                    line_start = true;
-                } else if matches!(token, Token::Colon(_)) {
-                    if Self::is_colon_preceded_by_doc_comments(tokens, source, i) {
-                        Self::set_trailing_blank_lines(&mut output, 0);
-                        line_start = true;
-                    } else {
-                        let source_blank_lines = Self::count_gap_blank_lines(gap);
-                        let target = self.target_blank_lines_before_definition(
-                            seen_first_definition,
-                            source_blank_lines,
-                        );
-                        Self::set_trailing_blank_lines(&mut output, target);
-                        line_start = true;
-                    }
-                } else if newlines > 0 {
-                    let in_doc_block = i > 0
-                        && matches!(tokens[i - 1], Token::Comment(_) | Token::StackComment(_))
-                        && matches!(token, Token::Comment(_) | Token::StackComment(_))
-                        && Self::count_gap_blank_lines(gap) == 0;
-
-                    if in_doc_block {
-                        Self::set_trailing_blank_lines(&mut output, 0);
-                        line_start = true;
-                    } else {
-                        let source_blank_lines = Self::count_gap_blank_lines(gap);
-                        let target = match self.config.blank_lines {
-                            BlankLinesConfig::No => 0,
-                            BlankLinesConfig::Collapse => {
-                                if source_blank_lines > 0 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                            BlankLinesConfig::Preserve => source_blank_lines,
-                        };
-                        Self::set_trailing_blank_lines(&mut output, target);
-                        line_start = true;
-                    }
-                }
+            if !in_definition
+                && self.apply_gap_blank_lines(tokens, source, i, seen_first_definition, &mut output)
+            {
+                line_start = true;
             }
 
             match token {
