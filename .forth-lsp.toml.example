@@ -41,6 +41,12 @@ preserve_definition_newlines = false
 # Helps visually separate definitions
 blank_line_between_definitions = true
 
+# How to handle blank lines during formatting (default: "collapse")
+# "no": removes all empty lines (except blank lines between definitions if blank_line_between_definitions is true)
+# "collapse": collapses multiple consecutive empty lines to a single empty line
+# "preserve": keeps all empty lines from original source
+blank_lines = "collapse"
+
 [builtin]
 # Additional builtin words specific to your Forth implementation
 # These words will be recognized as valid by the LSP and shown in hover/completion
