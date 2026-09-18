@@ -6,7 +6,6 @@ mod prelude;
 mod utils;
 mod words;
 
-use clap::Parser;
 use crate::cli::Cli;
 use crate::config::{Config, WorkspaceConfig};
 use crate::prelude::*;
@@ -29,6 +28,7 @@ use crate::utils::handlers::request_workspace_symbols::handle_workspace_symbols;
 use crate::utils::server_capabilities::forth_lsp_capabilities;
 use crate::utils::uri_helpers::{path_str_to_uri, uri_to_path};
 use crate::words::Words;
+use clap::Parser;
 
 use std::collections::HashMap;
 use std::fs;

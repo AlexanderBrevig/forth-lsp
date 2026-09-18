@@ -73,11 +73,33 @@ fn test_help_shows_version_flag() {
 }
 
 #[test]
-fn test_invalid_flag_exits_with_error() {
+fn test_extraneous_client_args_are_accepted() {
+    // LSP clients commonly pass arguments like --stdio; the server must not
+    // reject them at startup.
     let output = Command::new(env!("CARGO_BIN_EXE_forth-lsp"))
-        .arg("--nonexistent-flag")
+        .arg("--stdio")
         .output()
         .expect("failed to execute forth-lsp");
 
-    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "extraneous args should be accepted, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("starting generic LSP server"),
+        "server should start when given extraneous args, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_version_with_extraneous_args() {
+    let output = Command::new(env!("CARGO_BIN_EXE_forth-lsp"))
+        .args(["--version", "--stdio"])
+        .output()
+        .expect("failed to execute forth-lsp");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, format!("{}\n", env!("CARGO_PKG_VERSION")));
 }
