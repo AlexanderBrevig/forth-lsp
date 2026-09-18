@@ -1,35 +1,35 @@
-[workspace]
-members = ["lib/*"]
-resolver = "2"
-
 [package]
 name = "forth-lsp"
-version = "0.8.3"
+version = "0.9.0"
 edition = "2024"
-license = "MIT"
 description = "LSP for the Forth programming language"
 repository = "https://github.com/alexanderbrevig/forth-lsp"
+license = "MIT"
 keywords = ["forth", "lsp"]
 categories = ["development-tools"]
+
+[workspace]
+resolver = "2"
+members = ["lib/*"]
 
 [[bin]]
 name = "forth-lsp"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0.102"
+glob = "0.3"
 lsp-server = "0.10.0"
+lsp-types = "0.97.0"
+ropey = "1.6.1"
 serde = "1.0.228"
 serde_json = "1.0.150"
-lsp-types = "0.97.0"
-toml = "1"
-ropey = "1.6.1"
-anyhow = "1.0.102"
 thiserror = "2.0.18"
-glob = "0.3"
+toml = "1"
 
 [dependencies.forth-lexer]
-version = "0.2.1"
 path = "lib/forth-lexer"
+version = "0.2.1"
 features = ["ropey"]
 
 [dev-dependencies]

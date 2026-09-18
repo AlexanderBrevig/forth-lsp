@@ -37,16 +37,28 @@ pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn path_to_uri<P: AsRef<Path>>(path: P) -> Option<Uri> {
     let path_str = path.as_ref().to_str()?;
-    let uri_str = format!("file://{}", path_str);
-    uri_str.parse().ok()
+    path_str_to_uri(path_str)
 }
 
 /// Convert a file path string to a URI.
 ///
 /// This is a convenience wrapper for string paths.
-#[allow(dead_code)]
-pub fn path_str_to_uri(path: &str) -> Option<Uri> {
-    let uri_str = format!("file://{}", path);
+pub fn path_str_to_uri(path_or_uri: &str) -> Option<Uri> {
+    if path_or_uri.starts_with("file://")
+        && let Ok(uri) = path_or_uri.parse::<Uri>()
+    {
+        return Some(uri);
+    }
+
+    let path = path_or_uri.strip_prefix("file://").unwrap_or(path_or_uri);
+    let normalized = path.replace('\\', "/");
+    let with_leading_slash = if normalized.starts_with('/') {
+        normalized
+    } else {
+        format!("/{}", normalized)
+    };
+
+    let uri_str = format!("file://{}", with_leading_slash);
     uri_str.parse().ok()
 }
 

@@ -238,7 +238,9 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
-        let file_uri = format!("file://{}", file_path);
+        let file_uri = crate::utils::uri_helpers::path_str_to_uri(&file_path)
+            .unwrap()
+            .to_string();
 
         // Define a word that exists in built-ins
         let rope = Rope::from_str(": DUP 1 + ;");
@@ -272,7 +274,9 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
-        let file_uri = format!("file://{}", file_path);
+        let file_uri = crate::utils::uri_helpers::path_str_to_uri(&file_path)
+            .unwrap()
+            .to_string();
 
         // Define a word that doesn't exist in built-ins
         let rope = Rope::from_str(": myword 1 + ;");
@@ -304,7 +308,9 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
-        let file_uri = format!("file://{}", file_path);
+        let file_uri = crate::utils::uri_helpers::path_str_to_uri(&file_path)
+            .unwrap()
+            .to_string();
 
         // Define a variable
         let rope = Rope::from_str("VARIABLE counter");
@@ -336,7 +342,9 @@ mod tests {
         let mut index = DefinitionIndex::new();
         let temp_dir = env::temp_dir();
         let file_path = temp_dir.join("user.forth").to_string_lossy().to_string();
-        let file_uri = format!("file://{}", file_path);
+        let file_uri = crate::utils::uri_helpers::path_str_to_uri(&file_path)
+            .unwrap()
+            .to_string();
 
         // Define a multiline word
         let rope = Rope::from_str(
