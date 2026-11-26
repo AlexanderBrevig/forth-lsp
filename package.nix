@@ -1,23 +1,30 @@
 { lib
 , rustPlatform
-, ...
 }:
 let
   manifest = lib.importTOML ./Cargo.toml;
-  program = (lib.head manifest.bin).name;
 in
 rustPlatform.buildRustPackage {
   pname = manifest.package.name;
   version = manifest.package.version;
-  src = lib.cleanSource ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./Cargo.toml
+      ./Cargo.lock
+      ./src
+      ./lib
+      ./tests
+    ];
+  };
 
   cargoLock.lockFile = ./Cargo.lock;
+  cargoTestFlags = [ "--workspace" ];
 
-  meta = with lib; {
+  meta = {
     description = manifest.package.description;
     homepage = manifest.package.repository;
-    license = licenses.mit;
-    platforms = platforms.all;
-    mainProgram = program;
+    license = lib.getLicenseFromSpdxId manifest.package.license;
+    mainProgram = manifest.package.name;
   };
 }

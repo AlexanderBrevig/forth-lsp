@@ -24,17 +24,15 @@
         pkgs = import nixpkgs { inherit system overlays; };
 
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = rustToolchain;
-          rustc = rustToolchain;
-        };
-        forth-lsp = pkgs.callPackage ./package.nix { inherit rustPlatform; };
+        forth-lsp = pkgs.callPackage ./package.nix { };
       in
       {
         packages = {
           inherit forth-lsp;
           default = forth-lsp;
         };
+
+        checks.default = forth-lsp;
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
